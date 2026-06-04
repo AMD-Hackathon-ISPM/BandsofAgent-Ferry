@@ -1,0 +1,20 @@
+{
+  "name": "ferry-tui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.tsx",
+    "start": "tsx src/index.tsx",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.1",
+    "@types/react": "^18.3.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.8.3"
+  }
+}

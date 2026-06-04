@@ -1,0 +1,6 @@
+.git
+frontend/node_modules
+backend/ferry.exe
+backend/ferry-tui.exe
+backend/coverage.txt
+backend/coverage.html
