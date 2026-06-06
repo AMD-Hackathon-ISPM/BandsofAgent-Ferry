@@ -1,3 +1,4 @@
+import * as React from "react"
 import { IconAlertTriangle, IconCheck, IconX } from "@tabler/icons-react"
 
 import { PHASES, type PhaseKey } from "@/lib/domain"
@@ -15,11 +16,11 @@ const NODE: Record<PhaseNodeState, string> = {
 }
 
 const LABEL: Record<PhaseNodeState, string> = {
-  done: "text-foreground",
+  done: "text-foreground/80",
   active: "text-signal",
   blocked: "text-warning",
   failed: "text-destructive",
-  upcoming: "text-muted-foreground/60",
+  upcoming: "text-muted-foreground/55",
   skipped: "text-muted-foreground/40",
 }
 
@@ -46,15 +47,15 @@ export function PhasePipeline({
   const states = phaseStates(run)
 
   return (
-    <div className={cn("overflow-x-auto", className)}>
-      <ol className="flex min-w-max items-start">
-        {PHASES.map((phase, i) => {
-          const state = states[i]
-          const isSelected = selected === phase.key
-          const connectorDone = states[i] === "done"
-          const interactive = state !== "skipped" && state !== "upcoming"
-          return (
-            <li key={phase.key} className="flex items-start">
+    <ol className={cn("flex items-center", className)}>
+      {PHASES.map((phase, i) => {
+        const state = states[i]
+        const isSelected = selected === phase.key
+        const interactive = state !== "skipped" && state !== "upcoming"
+        const connectorDone = state === "done"
+        return (
+          <React.Fragment key={phase.key}>
+            <li className="relative shrink-0">
               <button
                 type="button"
                 disabled={!interactive}
@@ -63,37 +64,38 @@ export function PhasePipeline({
                 aria-label={`${phase.label} phase, ${state}`}
                 title={phase.hint}
                 className={cn(
-                  "group/phase flex w-[88px] flex-col items-center gap-1.5 px-1 pt-0.5 pb-1 outline-none",
-                  interactive ? "cursor-pointer" : "cursor-default",
+                  // 28px node, 44px hit target via the inset pseudo-element
+                  "relative flex size-7 items-center justify-center border outline-none transition-colors",
+                  "before:absolute before:-inset-2 before:content-['']",
                   "focus-visible:ring-1 focus-visible:ring-ring",
+                  interactive ? "cursor-pointer" : "cursor-default",
+                  NODE[state],
+                  isSelected && "ring-1 ring-signal/60 ring-offset-1 ring-offset-background",
                 )}
               >
-                <span
-                  className={cn(
-                    "relative flex size-7 items-center justify-center border transition-colors",
-                    NODE[state],
-                    isSelected && "ring-1 ring-signal/60 ring-offset-1 ring-offset-background",
-                  )}
-                >
-                  <NodeMark state={state} index={i} />
-                </span>
-                <span className={cn("max-w-full truncate text-[11px] font-medium", LABEL[state])}>
-                  {phase.short}
-                </span>
+                <NodeMark state={state} index={i} />
               </button>
-              {i < PHASES.length - 1 && (
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "mt-3.5 h-px w-5 shrink-0 sm:w-8",
-                    connectorDone ? "bg-success/40" : "bg-border",
-                  )}
-                />
-              )}
+              <span
+                className={cn(
+                  "pointer-events-none absolute top-full left-1/2 mt-1.5 hidden -translate-x-1/2 text-[11px] font-medium whitespace-nowrap sm:block",
+                  LABEL[state],
+                )}
+              >
+                {phase.short}
+              </span>
             </li>
-          )
-        })}
-      </ol>
-    </div>
+            {i < PHASES.length - 1 && (
+              <li
+                aria-hidden="true"
+                className={cn(
+                  "h-px min-w-3 flex-1 transition-colors",
+                  connectorDone ? "bg-success/40" : "bg-border",
+                )}
+              />
+            )}
+          </React.Fragment>
+        )
+      })}
+    </ol>
   )
 }

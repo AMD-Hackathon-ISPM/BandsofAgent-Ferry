@@ -61,7 +61,7 @@ function LoginPreview() {
               <div key={m.id} className="flex items-start gap-2.5">
                 <AgentGlyph agent={m.agent} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] text-foreground/80">{m.summary}</p>
+                  <p className="truncate font-mono text-[11px] text-foreground/80">{m.summary}</p>
                 </div>
               </div>
             ))}
@@ -131,7 +131,7 @@ export function Login() {
           </p>
         </div>
 
-        <p className="text-xs text-muted-foreground/70">SINGKONG @ 2026</p>
+        <p className="text-xs text-muted-foreground/70">SINGKONG © 2026</p>
       </div>
 
       <LoginPreview />

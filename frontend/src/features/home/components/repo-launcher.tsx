@@ -112,6 +112,7 @@ export function RepoLauncher({ className }: { className?: string }) {
             <InputGroup>
               <InputGroupInput
                 id="repo-url"
+                className="font-mono"
                 placeholder="github.com/your-org/legacy-app"
                 autoComplete="off"
                 autoCapitalize="off"
@@ -144,7 +145,7 @@ export function RepoLauncher({ className }: { className?: string }) {
                     {i > 0 && ", "}
                     <button
                       type="button"
-                      className="text-foreground underline-offset-2 outline-none hover:underline focus-visible:underline"
+                      className="font-mono text-foreground underline-offset-2 outline-none hover:underline focus-visible:underline"
                       onClick={() => setInput(s)}
                     >
                       {s}
@@ -161,11 +162,11 @@ export function RepoLauncher({ className }: { className?: string }) {
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-2 text-xs">
                   <IconBrandGithub className="size-3.5 text-muted-foreground" />
-                  <span className="font-medium">
+                  <span className="font-mono font-medium">
                     {repo.owner}/{repo.name}
                   </span>
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
                   <IconGitBranch className="size-3" />
                   {repo.defaultBranch}
                 </span>

@@ -172,9 +172,9 @@ function PullRequestCard({ run }: { run: Run }) {
       </div>
       <div className="flex flex-col gap-2.5 p-3">
         <p className="text-[13px] text-foreground">
-          <span className="text-muted-foreground">#{pr.number}</span> {pr.title}
+          <span className="tabular text-muted-foreground">#{pr.number}</span> {pr.title}
         </p>
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
           <IconGitBranch className="size-3" />
           <span className="border border-border px-1.5 py-0.5">{pr.sourceBranch}</span>
           <IconChevronRight className="size-3" />
@@ -199,7 +199,7 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
       <div className="flex items-center gap-2.5 px-2.5 py-2">
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12px] text-foreground">{artifact.fileName}</span>
+          <span className="block truncate font-mono text-[12px] text-foreground">{artifact.fileName}</span>
           <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <AgentGlyph agent={artifact.createdBy} size="sm" />
             <span className="tabular">{formatBytes(artifact.sizeBytes)}</span>

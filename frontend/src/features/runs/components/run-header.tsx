@@ -10,11 +10,12 @@ import {
 } from "@tabler/icons-react"
 
 import { canApprove as canApproveRole, canCancel as canCancelRole, isLive } from "@/lib/domain"
+import type { PhaseKey, Role } from "@/lib/domain"
 import { clock, elapsed, relativeTime, shortSha } from "@/lib/format"
 import type { Run } from "@/lib/types"
-import type { Role } from "@/lib/domain"
 import { cn } from "@/lib/utils"
 import { LangRoute } from "@/features/migrations/components/lang-route"
+import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
 import { StatusBadge } from "@/features/migrations/components/status-badge"
 import { Button } from "@/components/ui/button"
 
@@ -28,12 +29,16 @@ export function RunHeader({
   role,
   now,
   dbApproved = false,
+  selectedPhase,
+  onSelectPhase,
   className,
 }: {
   run: Run
   role: Role
   now: number
   dbApproved?: boolean
+  selectedPhase?: PhaseKey | null
+  onSelectPhase?: (phase: PhaseKey | null) => void
   className?: string
 }) {
   const live = isLive(run.status)
@@ -42,42 +47,44 @@ export function RunHeader({
 
   return (
     <header className={cn("border-b border-border bg-background", className)}>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button asChild size="icon-sm" variant="ghost" className="text-muted-foreground" aria-label="Back to runs">
-            <Link to="/">
-              <IconChevronLeft />
-            </Link>
-          </Button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-sm font-semibold">{run.project.name}</h1>
-              <span className="tabular text-xs text-muted-foreground">Run #{run.runNumber}</span>
-              <StatusBadge status={run.status} />
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <LangRoute source={run.project.sourceLanguage} target={run.project.targetLanguage} />
+      <div className="flex items-center gap-3 px-4 py-2.5">
+        <Button asChild size="icon-sm" variant="ghost" className="shrink-0 text-muted-foreground" aria-label="Back to runs">
+          <Link to="/">
+            <IconChevronLeft />
+          </Link>
+        </Button>
+
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="truncate text-sm font-semibold">{run.project.name}</h1>
+            <span className="tabular text-xs text-muted-foreground">Run #{run.runNumber}</span>
+            <StatusBadge status={run.status} />
+          </div>
+
+          <span aria-hidden="true" className="hidden h-3.5 w-px shrink-0 bg-border md:block" />
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <LangRoute source={run.project.sourceLanguage} target={run.project.targetLanguage} />
+            <span className="inline-flex items-center gap-1">
+              <IconGitCommit className="size-3" />
+              <span className="tabular">{shortSha(run.sourceCommit)}</span>
+              <IconChevronLeft className="size-3 rotate-180" />
+              <IconGitBranch className="size-3" />
+              <span className="font-mono">{run.targetBranch}</span>
+            </span>
+            {run.startedAt && (
               <span className="inline-flex items-center gap-1">
-                <IconGitCommit className="size-3" />
-                <span className="tabular">{shortSha(run.sourceCommit)}</span>
-                <IconChevronLeft className="size-3 rotate-180" />
-                <IconGitBranch className="size-3" />
-                {run.targetBranch}
-              </span>
-              {run.startedAt && (
-                <span className="inline-flex items-center gap-1">
-                  <IconClock className="size-3" />
-                  <span className="tabular" aria-live={live ? "off" : undefined}>
-                    {timer}
-                  </span>
-                  {!live && <span className="text-muted-foreground/60">· {relativeTime(run.startedAt, now)}</span>}
+                <IconClock className="size-3" />
+                <span className="tabular" aria-live={live ? "off" : undefined}>
+                  {timer}
                 </span>
-              )}
-            </div>
+                {!live && <span className="text-muted-foreground/60">· {relativeTime(run.startedAt, now)}</span>}
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {dbPending && canApproveRole(role) && (
             <Button size="sm" onClick={scrollToDbPlan} className="bg-warning text-warning-foreground hover:bg-warning/90">
               Review DB plan
@@ -113,6 +120,10 @@ export function RunHeader({
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="px-4 pt-0.5 pb-5">
+        <PhasePipeline run={run} selected={selectedPhase} onSelect={onSelectPhase} />
       </div>
     </header>
   )

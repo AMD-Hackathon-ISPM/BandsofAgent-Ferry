@@ -12,7 +12,6 @@ import { useAuth } from "@/providers/auth-provider"
 import { AgentRoster } from "@/features/runs/components/agent-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
-import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
 import { RunHeader } from "@/features/runs/components/run-header"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,12 +20,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 function RunSkeleton() {
   return (
     <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
-      <div className="border-b border-border px-4 py-3">
-        <Skeleton className="h-5 w-64" />
-        <Skeleton className="mt-2 h-3 w-80" />
-      </div>
-      <div className="border-b border-border px-4 py-4">
-        <Skeleton className="h-7 w-full max-w-2xl" />
+      <div className="border-b border-border px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-7 shrink-0" />
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-4 w-64" />
+        </div>
+        <div className="mt-3 flex items-center gap-3 pb-2.5">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <div key={i} className="flex flex-1 items-center gap-3 last:flex-none">
+              <Skeleton className="size-7 shrink-0" />
+              {i < 6 && <span className="h-px flex-1 bg-border" />}
+            </div>
+          ))}
+        </div>
       </div>
       <div className="grid flex-1 grid-cols-1 xl:grid-cols-[15rem_minmax(0,1fr)_22rem]">
         <div className="hidden flex-col gap-3 border-r border-border p-3 xl:flex">
@@ -158,11 +165,14 @@ function RunReady({
 
   return (
     <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
-      <RunHeader run={liveRun} role={role} now={now} dbApproved={dbApproved} />
-
-      <div className="border-b border-border bg-background px-4 py-3">
-        <PhasePipeline run={liveRun} selected={selectedPhase} onSelect={setSelectedPhase} />
-      </div>
+      <RunHeader
+        run={liveRun}
+        role={role}
+        now={now}
+        dbApproved={dbApproved}
+        selectedPhase={selectedPhase}
+        onSelectPhase={setSelectedPhase}
+      />
 
       <RunBanner run={liveRun} onAction={handleAction} />
 

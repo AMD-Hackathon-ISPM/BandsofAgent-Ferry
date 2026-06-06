@@ -26,7 +26,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 const TYPE_TONE: Record<string, string> = {
   neutral: "text-muted-foreground",
-  accent: "text-primary",
+  accent: "text-primary-bright",
   signal: "text-signal",
   success: "text-success",
   warning: "text-warning",
@@ -44,7 +44,7 @@ function PayloadView({ payload }: { payload: Record<string, unknown> }) {
   const entries = Object.entries(payload).filter(([k]) => k !== "file" && k !== "artifact")
   if (entries.length === 0) return null
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-muted/40 p-2.5 text-[11px]">
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-muted/40 p-2.5 font-mono text-[11px]">
       {entries.map(([key, value]) => (
         <React.Fragment key={key}>
           <dt className="text-muted-foreground">{key}</dt>
@@ -124,10 +124,10 @@ function MessageRow({
           </span>
         </div>
 
-        <p className="mt-1 text-[13px] leading-snug text-foreground/90">{message.summary}</p>
+        <p className="mt-1 font-mono text-[12.5px] leading-snug text-foreground/90">{message.summary}</p>
 
         {hasFile && (
-          <span className="mt-2 inline-flex items-center gap-1.5 border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+          <span className="mt-2 inline-flex items-center gap-1.5 border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
             <IconFile className="size-3" />
             {String(message.payload!.file)}
           </span>
