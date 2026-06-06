@@ -22,8 +22,9 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port string
-	Env  string
+	Port        string
+	Env         string
+	FrontendURL string
 }
 
 type DatabaseConfig struct {
@@ -79,7 +80,10 @@ type ModelConfig struct {
 }
 
 type GitHubConfig struct {
-	PAT string
+	PAT          string
+	ClientID     string
+	ClientSecret string
+	RedirectURI  string
 }
 
 type LoggingConfig struct {
@@ -103,8 +107,9 @@ type FeatureFlags struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
-			Port: getEnv("PORT", "8080"),
-			Env:  getEnv("ENV", "development"),
+			Port:        getEnv("PORT", "8080"),
+			Env:         getEnv("ENV", "development"),
+			FrontendURL: getEnv("FRONTEND_URL", "http://localhost:3000"),
 		},
 		Database: DatabaseConfig{
 			Host:            getEnv("DB_HOST", "localhost"),
@@ -153,7 +158,10 @@ func Load() (*Config, error) {
 			Endpoint:    getEnv("MODEL_ENDPOINT", ""),
 		},
 		GitHub: GitHubConfig{
-			PAT: getEnv("GITHUB_PAT", ""),
+			PAT:          getEnv("GITHUB_PAT", ""),
+			ClientID:     getEnv("GITHUB_CLIENT_ID", ""),
+			ClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
+			RedirectURI:  getEnv("GITHUB_REDIRECT_URI", "http://localhost:8080/auth/github/callback"),
 		},
 		Logging: LoggingConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),

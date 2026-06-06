@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ferry/backend/internal/db"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -230,4 +231,99 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 
 func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 	return s.jwt.ValidateAccessToken(tokenString)
+}
+
+type GitHubUserInfo struct {
+	ID        int64  `json:"id"`
+	Login     string `json:"login"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+type GitHubLoginOutput struct {
+	UserID    string
+	CompanyID string
+	Role      string
+	Tokens    *TokenPair
+}
+
+func (s *Service) GitHubLogin(ctx context.Context, ghUser *GitHubUserInfo) (*GitHubLoginOutput, error) {
+	name := ghUser.Name
+	if name == "" {
+		name = ghUser.Login
+	}
+
+	user, err := s.queries.GetUserByEmail(ctx, ghUser.Email)
+	isNew := false
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("failed to lookup user: %w", err)
+		}
+		isNew = true
+		avatar := ghUser.AvatarURL
+		user, err = s.queries.CreateUser(ctx, ghUser.Email, "", name, &avatar)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create user: %w", err)
+		}
+	}
+
+	var companyID string
+	var role db.MembershipRole
+
+	if isNew {
+		slug := fmt.Sprintf("gh-%d", ghUser.ID)
+		company, err := s.queries.CreateCompany(ctx, name+"'s Workspace", slug, nil, nil, nil, []byte(`{}`))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create company: %w", err)
+		}
+		companyID = company.ID.String()
+		role = db.MembershipRoleOwner
+		_, err = s.queries.CreateMembership(
+			ctx,
+			company.ID,
+			user.ID,
+			role,
+			pgtype.UUID{},
+			pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create membership: %w", err)
+		}
+	} else {
+		memberships, err := s.queries.GetUserMemberships(ctx, user.ID)
+		if err != nil || len(memberships) == 0 {
+			slug := fmt.Sprintf("gh-%d", ghUser.ID)
+			company, cerr := s.queries.CreateCompany(ctx, name+"'s Workspace", slug, nil, nil, nil, []byte(`{}`))
+			if cerr != nil {
+				return nil, fmt.Errorf("failed to create company: %w", cerr)
+			}
+			companyID = company.ID.String()
+			role = db.MembershipRoleOwner
+			_, _ = s.queries.CreateMembership(ctx, company.ID, user.ID, role, pgtype.UUID{}, pgtype.Timestamptz{Time: time.Now(), Valid: true})
+		} else {
+			companyID = memberships[0].CompanyID.String()
+			role = memberships[0].Role
+		}
+	}
+
+	tokens, err := s.jwt.GenerateTokenPair(user.ID.String(), companyID, user.Email, string(role))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate tokens: %w", err)
+	}
+
+	expiresAt := time.Now().Add(s.jwt.GetRefreshExpiration())
+	_, err = s.queries.CreateRefreshToken(ctx, user.ID, tokens.RefreshToken, pgtype.Timestamptz{Time: expiresAt, Valid: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	_ = s.queries.UpdateUserLastLogin(ctx, user.ID)
+
+	return &GitHubLoginOutput{
+		UserID:    user.ID.String(),
+		CompanyID: companyID,
+		Role:      string(role),
+		Tokens:    tokens,
+	}, nil
 }
