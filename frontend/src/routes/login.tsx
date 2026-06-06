@@ -1,4 +1,4 @@
-import { Navigate, useLocation, useNavigate } from "react-router-dom"
+import { Navigate, useLocation } from "react-router-dom"
 import { IconBrandGithub, IconLock } from "@tabler/icons-react"
 
 import { AGENT_ORDER } from "@/lib/domain"
@@ -80,7 +80,6 @@ function LoginPreview() {
 
 export function Login() {
   const { user, status, beginGitHub } = useAuth()
-  const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: string } | null)?.from ?? "/"
 
@@ -90,7 +89,6 @@ export function Login() {
 
   const signIn = () => {
     beginGitHub()
-    navigate("/auth/callback")
   }
 
   return (

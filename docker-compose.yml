@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18.4-alpine3.23
     container_name: ferry-postgres
     environment:
       POSTGRES_DB: ferry
@@ -20,7 +20,7 @@ services:
       - ferry-network
 
   redis:
-    image: redis:7-alpine
+    image: redis:8.8.0-alpine
     container_name: ferry-redis
     command: redis-server --appendonly yes
     ports:
@@ -36,7 +36,7 @@ services:
       - ferry-network
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     container_name: ferry-minio
     command: server /data --console-address ":9001"
     environment:
@@ -55,92 +55,75 @@ services:
     networks:
       - ferry-network
 
+  migrate:
+    image: migrate/migrate:latest
+    container_name: ferry-migrate
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://ferry:ferry_dev_password@postgres:5432/ferry?sslmode=disable"
+      - "up"
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ferry-network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: ferry-backend
+    env_file:
+      - ./backend/.env
     environment:
-      PORT: 8080
-      ENV: development
-
+      # Override localhost-only values with Docker service names
       DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ferry
-      DB_USER: ferry
-      DB_PASSWORD: ferry_dev_password
-      DB_SSL_MODE: disable
-
       REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ""
-      REDIS_DB: 0
-
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ferry
-      MINIO_SECRET_KEY: ferry_dev_password
-      MINIO_USE_SSL: "false"
-      MINIO_BUCKET_SOURCE: ferry-source-files
-      MINIO_BUCKET_ARTIFACTS: ferry-artifacts
-      MINIO_BUCKET_REPORTS: ferry-reports
-
-      JWT_SECRET: dev_jwt_secret_change_in_production
-      JWT_ACCESS_EXPIRY: 15m
-      JWT_REFRESH_EXPIRY: 168h
-
-      BAND_PROVIDER: stub
-      BAND_BASE_URL: https://api.band.dev/v1
-      BAND_API_KEY: ""
-
-      IBM_MODEL_ENDPOINT: ""
-      IBM_MODEL_API_KEY: ""
-      IBM_MODEL_ID: ""
-
-      GITHUB_PAT: ""
-    ports:
-      - "8080:8080"
+      FRONTEND_URL: http://localhost
+      GITHUB_REDIRECT_URI: http://localhost/auth/github/callback
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - ferry-network
     restart: unless-stopped
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    container_name: ferry-frontend-tui
-    environment:
-      FERRY_REPO_ROOT: /workspace
-      FERRY_BACKEND_DIR: /workspace/backend
-      FERRY_BACKEND_URL: http://backend:8080
-    depends_on:
-      backend:
-        condition: service_healthy
-    stdin_open: true
-    tty: true
-    profiles:
-      - tui
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost
+    container_name: ferry-frontend
     networks:
       - ferry-network
+    restart: unless-stopped
 
   nginx:
-    image: nginx:alpine
+    image: nginx:stable-alpine3.23-perl
     container_name: ferry-nginx
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./backend/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
     networks:
       - ferry-network
     restart: unless-stopped
