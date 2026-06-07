@@ -1,6 +1,8 @@
 import type { RecentRunSummary, Run } from "@/lib/types"
 import { RECENT_RUNS, getRun } from "@/lib/mock/data"
 
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
+
 const latency = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export async function fetchRecentRuns(): Promise<RecentRunSummary[]> {
@@ -26,56 +28,11 @@ export interface ResolvedRepo {
   detectedLabel: string
 }
 
-const REPO_FIXTURES: Record<string, ResolvedRepo> = {
-  "northwind/payroll-cobol": {
-    owner: "northwind",
-    name: "payroll-cobol",
-    defaultBranch: "main",
-    branches: ["main", "release/payroll-2026", "migration-preview"],
-    detectedLanguage: "cobol",
-    detectedLabel: "COBOL",
-  },
-  "northwind/ledger-java": {
-    owner: "northwind",
-    name: "ledger-java",
-    defaultBranch: "main",
-    branches: ["main", "develop", "modernization"],
-    detectedLanguage: "java",
-    detectedLabel: "Java",
-  },
-  "northwind/claims-php": {
-    owner: "northwind",
-    name: "claims-php",
-    defaultBranch: "trunk",
-    branches: ["trunk", "main", "claims-refactor"],
-    detectedLanguage: "php",
-    detectedLabel: "PHP",
-  },
-  "northwind/web-dashboard": {
-    owner: "northwind",
-    name: "web-dashboard",
-    defaultBranch: "main",
-    branches: ["main", "develop"],
-    detectedLanguage: "unsupported",
-    detectedLabel: "TypeScript",
-  },
-}
-
-function detectLanguageFromName(
-  name: string
-): ResolvedRepo["detectedLanguage"] {
-  const normalized = name.toLowerCase()
-  if (normalized.includes("java")) return "java"
-  if (normalized.includes("php")) return "php"
-  return "cobol"
-}
-
 export type RepoResolution =
   | { ok: true; repo: ResolvedRepo }
   | { ok: false; reason: "format" | "access" }
 
-export async function resolveRepo(input: string): Promise<RepoResolution> {
-  await latency(650)
+function parseRepoInput(input: string): string | null {
   const match = input
     .trim()
     .replace(/^https?:\/\//, "")
@@ -83,32 +40,39 @@ export async function resolveRepo(input: string): Promise<RepoResolution> {
     .replace(/\.git$/, "")
     .replace(/\/$/, "")
   const parts = match.split("/")
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    return { ok: false, reason: "format" }
-  }
-  const key = `${parts[0]}/${parts[1]}`
-  const repo = REPO_FIXTURES[key]
-  if (repo) return { ok: true, repo }
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null
+  return `${parts[0]}/${parts[1]}`
+}
 
-  const detectedLanguage = detectLanguageFromName(parts[1])
-  return {
-    ok: true,
-    repo: {
-      owner: parts[0],
-      name: parts[1],
-      defaultBranch: "main",
-      branches: ["main", "develop", "migration-preview"],
-      detectedLanguage,
-      detectedLabel:
-        detectedLanguage === "java"
-          ? "Java"
-          : detectedLanguage === "php"
-            ? "PHP"
-            : "COBOL",
-    },
+export async function resolveRepo(
+  input: string,
+  accessToken: string,
+): Promise<RepoResolution> {
+  const key = parseRepoInput(input)
+  if (!key) return { ok: false, reason: "format" }
+
+  try {
+    const resp = await fetch(
+      `${API_URL}/api/github/repos/resolve?repo=${encodeURIComponent(key)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (resp.status === 404) return { ok: false, reason: "access" }
+    if (!resp.ok) return { ok: false, reason: "access" }
+    const repo = (await resp.json()) as ResolvedRepo
+    return { ok: true, repo }
+  } catch {
+    return { ok: false, reason: "access" }
   }
 }
 
-export const REPO_SUGGESTIONS = Object.keys(REPO_FIXTURES).filter(
-  (k) => k !== "northwind/web-dashboard"
-)
+export async function fetchRepoSuggestions(accessToken: string): Promise<string[]> {
+  try {
+    const resp = await fetch(`${API_URL}/api/github/repos/suggestions`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!resp.ok) return []
+    return (await resp.json()) as string[]
+  } catch {
+    return []
+  }
+}

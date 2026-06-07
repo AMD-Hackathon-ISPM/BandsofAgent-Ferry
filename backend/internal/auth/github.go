@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type GitHubOAuthConfig struct {
@@ -24,10 +26,11 @@ type GitHubHandler struct {
 	cfg     GitHubOAuthConfig
 	service *Service
 	states  sync.Map
+	rdb     *redis.Client
 }
 
-func NewGitHubHandler(cfg GitHubOAuthConfig, service *Service) *GitHubHandler {
-	return &GitHubHandler{cfg: cfg, service: service}
+func NewGitHubHandler(cfg GitHubOAuthConfig, service *Service, rdb *redis.Client) *GitHubHandler {
+	return &GitHubHandler{cfg: cfg, service: service, rdb: rdb}
 }
 
 func (h *GitHubHandler) HandleBegin(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +44,6 @@ func (h *GitHubHandler) HandleBegin(w http.ResponseWriter, r *http.Request) {
 	params := url.Values{
 		"client_id":    {h.cfg.ClientID},
 		"redirect_uri": {h.cfg.RedirectURI},
-		"scope":        {"read:user user:email"},
 		"state":        {state},
 	}
 
@@ -81,6 +83,10 @@ func (h *GitHubHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Redirect(w, r, frontendCallback+"?error=login_failed", http.StatusTemporaryRedirect)
 		return
+	}
+
+	if h.rdb != nil {
+		h.rdb.Set(r.Context(), "github_token:"+result.UserID, ghToken, 8*time.Hour)
 	}
 
 	params := url.Values{

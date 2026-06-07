@@ -16,7 +16,10 @@ import (
 	"github.com/ferry/backend/internal/auth"
 	"github.com/ferry/backend/internal/config"
 	"github.com/ferry/backend/internal/db"
+	ghpkg "github.com/ferry/backend/internal/github"
+	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -30,6 +33,9 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer pool.Close()
+
+	rdb := connectRedis(cfg)
+	defer rdb.Close()
 
 	queries := db.New(pool)
 
@@ -48,13 +54,27 @@ func main() {
 		ClientSecret: cfg.GitHub.ClientSecret,
 		RedirectURI:  cfg.GitHub.RedirectURI,
 		FrontendURL:  cfg.Server.FrontendURL,
-	}, authService)
+	}, authService, rdb)
+
+	authMiddleware := middleware.NewAuthMiddleware(authService)
+
+	ghAPIHandler := ghpkg.NewHandler(rdb, cfg.GitHub.PAT)
 
 	mux := http.NewServeMux()
+
+	// Public routes
 	mux.HandleFunc("/", handleRoot)
 	mux.HandleFunc("/health", handleHealth(cfg))
 	mux.HandleFunc("/auth/github", ghHandler.HandleBegin)
 	mux.HandleFunc("/auth/github/callback", ghHandler.HandleCallback)
+
+	// Protected routes
+	mux.Handle("/api/github/repos/resolve", authMiddleware.Authenticate(
+		http.HandlerFunc(ghAPIHandler.ResolveRepo),
+	))
+	mux.Handle("/api/github/repos/suggestions", authMiddleware.Authenticate(
+		http.HandlerFunc(ghAPIHandler.ListSuggestions),
+	))
 
 	handler := corsMiddleware(cfg)(mux)
 
@@ -92,12 +112,19 @@ func connectDB(cfg *config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
-
 	if err := pool.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-
 	return pool, nil
+}
+
+func connectRedis(cfg *config.Config) *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:       cfg.Redis.Host + ":" + cfg.Redis.Port,
+		Password:   cfg.Redis.Password,
+		DB:         cfg.Redis.DB,
+		MaxRetries: cfg.Redis.MaxRetries,
+	})
 }
 
 func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
@@ -117,12 +144,10 @@ func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			if cfg.CORS.AllowCredentials {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
-
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -133,10 +158,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"service": "ferry-backend",
-		"status":  "running",
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"service": "ferry-backend", "status": "running"})
 }
 
 func handleHealth(cfg *config.Config) http.HandlerFunc {
@@ -161,7 +183,6 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 func waitForShutdown(server *http.Server) {
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
 	<-signalContext.Done()
 	log.Println("shutdown signal received")
 

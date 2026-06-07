@@ -44,7 +44,6 @@ services:
       MINIO_ROOT_PASSWORD: ferry_dev_password
     ports:
       - "9000:9000"
-      - "9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:

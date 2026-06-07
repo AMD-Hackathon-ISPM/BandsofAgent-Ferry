@@ -15,7 +15,8 @@ import {
   type SourceLanguage,
   type TargetLanguage,
 } from "@/lib/domain"
-import { resolveRepo, REPO_SUGGESTIONS, type ResolvedRepo } from "@/lib/api"
+import { resolveRepo, fetchRepoSuggestions, type ResolvedRepo } from "@/lib/api"
+import { useAuth } from "@/providers/auth-provider"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -55,8 +56,10 @@ const ERROR_COPY: Record<Reason, string> = {
 
 export function RepoLauncher({ className }: { className?: string }) {
   const navigate = useNavigate()
+  const { accessToken } = useAuth()
   const [input, setInput] = React.useState("")
   const [repoMenuOpen, setRepoMenuOpen] = React.useState(false)
+  const [suggestions, setSuggestions] = React.useState<string[]>([])
   const [phase, setPhase] = React.useState<Phase>("idle")
   const [reason, setReason] = React.useState<Reason | null>(null)
   const [repo, setRepo] = React.useState<ResolvedRepo | null>(null)
@@ -67,19 +70,25 @@ export function RepoLauncher({ className }: { className?: string }) {
   const pickerRef = React.useRef<HTMLDivElement>(null)
   const seq = React.useRef(0)
 
-  const run = React.useCallback(async (value: string) => {
-    const trimmed = value.trim()
-    if (!trimmed) {
-      setPhase("idle")
-      setReason(null)
-      setRepo(null)
-      setBranch("main")
-      return
-    }
-    const ticket = ++seq.current
-    setPhase("validating")
-    const result = await resolveRepo(trimmed)
-    if (ticket !== seq.current) return
+  React.useEffect(() => {
+    if (!accessToken) return
+    fetchRepoSuggestions(accessToken).then(setSuggestions).catch(() => {})
+  }, [accessToken])
+
+  const run = React.useCallback(
+    async (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed) {
+        setPhase("idle")
+        setReason(null)
+        setRepo(null)
+        setBranch("main")
+        return
+      }
+      const ticket = ++seq.current
+      setPhase("validating")
+      const result = await resolveRepo(trimmed, accessToken ?? "")
+      if (ticket !== seq.current) return
     if (!result.ok) {
       setReason(result.reason)
       setRepo(null)
@@ -92,20 +101,22 @@ export function RepoLauncher({ className }: { className?: string }) {
       setPhase("error")
       return
     }
-    setRepo(result.repo)
-    setBranch(result.repo.defaultBranch)
-    setSource(result.repo.detectedLanguage)
-    setReason(null)
-    setPhase("resolved")
-  }, [])
+      setRepo(result.repo)
+      setBranch(result.repo.defaultBranch)
+      setSource(result.repo.detectedLanguage)
+      setReason(null)
+      setPhase("resolved")
+    },
+    [accessToken],
+  )
 
   const repoOptions = React.useMemo(() => {
     const query = input.trim().toLowerCase()
-    if (!query) return REPO_SUGGESTIONS
-    return REPO_SUGGESTIONS.filter((repoPath) =>
-      repoPath.toLowerCase().includes(query)
+    if (!query) return suggestions
+    return suggestions.filter((repoPath) =>
+      repoPath.toLowerCase().includes(query),
     )
-  }, [input])
+  }, [input, suggestions])
 
   React.useEffect(() => {
     const id = window.setTimeout(() => run(input), 600)
