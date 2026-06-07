@@ -22,7 +22,11 @@ import { cn } from "@/lib/utils"
 import { AgentGlyph } from "@/features/migrations/components/agent"
 import { BandChatter } from "@/features/runs/components/band-chatter"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 
 const TYPE_TONE: Record<string, string> = {
   neutral: "text-muted-foreground",
@@ -34,14 +38,22 @@ const TYPE_TONE: Record<string, string> = {
 
 function PrimitiveValue({ value }: { value: unknown }) {
   if (typeof value === "boolean")
-    return <span className={value ? "text-warning" : "text-muted-foreground"}>{String(value)}</span>
+    return (
+      <span className={value ? "text-warning" : "text-muted-foreground"}>
+        {String(value)}
+      </span>
+    )
   if (typeof value === "number")
-    return <span className="tabular text-foreground">{value.toLocaleString()}</span>
+    return (
+      <span className="tabular text-foreground">{value.toLocaleString()}</span>
+    )
   return <span className="text-foreground">{String(value)}</span>
 }
 
 function PayloadView({ payload }: { payload: Record<string, unknown> }) {
-  const entries = Object.entries(payload).filter(([k]) => k !== "file" && k !== "artifact")
+  const entries = Object.entries(payload).filter(
+    ([k]) => k !== "file" && k !== "artifact"
+  )
   if (entries.length === 0) return null
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-muted/40 p-2.5 font-mono text-[11px]">
@@ -95,7 +107,11 @@ function MessageRow({
   return (
     <li className={cn("flex items-stretch gap-3", isNew && "stream-in")}>
       <div className="flex flex-col items-center pt-0.5">
-        <span data-feed-glyph data-agent={message.agent} className="inline-flex">
+        <span
+          data-feed-glyph
+          data-agent={message.agent}
+          className="inline-flex"
+        >
           <AgentGlyph agent={message.agent} size="md" active={isNew} />
         </span>
         <span className="mt-1 w-px flex-1 bg-border" aria-hidden="true" />
@@ -106,7 +122,12 @@ function MessageRow({
           <span className="text-xs font-medium" style={{ color: agent.color }}>
             {agent.name}
           </span>
-          <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", TYPE_TONE[typeMeta.tone])}>
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 text-[11px] font-medium",
+              TYPE_TONE[typeMeta.tone]
+            )}
+          >
             <TypeIcon className="size-3.5" />
             {typeMeta.label}
           </span>
@@ -116,15 +137,22 @@ function MessageRow({
               <span style={{ color: target.color }}>{target.name}</span>
             </span>
           )}
-          <span className="text-[11px] text-muted-foreground/70">{phase.label}</span>
+          <span className="text-[11px] text-muted-foreground/70">
+            {phase.label}
+          </span>
           <span className="ml-auto flex items-center gap-2.5">
-            <time className="text-[11px] text-muted-foreground/70" dateTime={message.createdAt}>
+            <time
+              className="text-[11px] text-muted-foreground/70"
+              dateTime={message.createdAt}
+            >
               {relativeTime(message.createdAt, now)}
             </time>
           </span>
         </div>
 
-        <p className="mt-1 font-mono text-[12.5px] leading-snug text-foreground/90">{message.summary}</p>
+        <p className="mt-1 font-mono text-[12.5px] leading-snug text-foreground/90">
+          {message.summary}
+        </p>
 
         {hasFile && (
           <span className="mt-2 inline-flex items-center gap-1.5 border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
@@ -199,9 +227,9 @@ export function BandFeed({
       messages.filter(
         (m) =>
           (!selectedAgent || m.agent === selectedAgent) &&
-          (!selectedPhase || m.phase === selectedPhase),
+          (!selectedPhase || m.phase === selectedPhase)
       ),
-    [messages, selectedAgent, selectedPhase],
+    [messages, selectedAgent, selectedPhase]
   )
   const hasFilter = Boolean(selectedAgent || selectedPhase)
 
@@ -214,12 +242,15 @@ export function BandFeed({
     if (bottom) setNewCount(0)
   }, [])
 
-  const scrollToBottom = React.useCallback((behavior: ScrollBehavior = "smooth") => {
-    const el = scrollRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior })
-    setNewCount(0)
-  }, [])
+  const scrollToBottom = React.useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollTo({ top: el.scrollHeight, behavior })
+      setNewCount(0)
+    },
+    []
+  )
 
   React.useLayoutEffect(() => {
     if (messages.length > prevLen.current) {
@@ -234,11 +265,15 @@ export function BandFeed({
   }, [run.id, scrollToBottom])
 
   return (
-    <section className={cn("relative flex min-h-0 flex-col", className)} aria-label="Band room feed">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+    <section
+      className={cn("relative flex min-h-0 flex-col", className)}
+      aria-label="Band room feed"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="text-xs font-semibold tracking-wide">Band room</h2>
-          <span className="truncate text-[11px] text-muted-foreground">{run.bandRoomName}</span>
+          <h2 className="truncate text-xs font-semibold text-muted-foreground uppercase">
+            Band room <span>{run.bandRoomName}</span>
+          </h2>
         </div>
         {hasFilter ? (
           <button
@@ -250,11 +285,17 @@ export function BandFeed({
             Clear filter
           </button>
         ) : (
-          <span className="text-[11px] text-muted-foreground">{filtered.length} messages</span>
+          <span className="text-[11px] text-muted-foreground">
+            {filtered.length} messages
+          </span>
         )}
       </div>
 
-      <div ref={scrollRef} onScroll={checkBottom} className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div
+        ref={scrollRef}
+        onScroll={checkBottom}
+        className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3"
+      >
         {isLive(run.status) && filtered.length > 1 && (
           <BandChatter scrollRef={scrollRef} enabled />
         )}
@@ -265,14 +306,20 @@ export function BandFeed({
             </p>
           ) : run.status === "pending" ? (
             <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-              <span className="size-2 rounded-full bg-signal dot-pulse" aria-hidden="true" />
+              <span
+                className="dot-pulse size-2 rounded-full bg-signal"
+                aria-hidden="true"
+              />
               <p className="text-sm font-medium">Assembling the band</p>
               <p className="max-w-xs text-xs text-muted-foreground">
-                Agents are registering for this run. The first messages land as soon as the Router posts the plan.
+                Agents are registering for this run. The first messages land as
+                soon as the Router posts the plan.
               </p>
             </div>
           ) : (
-            <p className="px-1 py-8 text-center text-xs text-muted-foreground">No messages yet.</p>
+            <p className="px-1 py-8 text-center text-xs text-muted-foreground">
+              No messages yet.
+            </p>
           )
         ) : (
           <ol className="flex flex-col">

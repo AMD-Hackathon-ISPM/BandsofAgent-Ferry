@@ -18,6 +18,9 @@ import (
 	"github.com/ferry/backend/internal/db"
 	ghpkg "github.com/ferry/backend/internal/github"
 	"github.com/ferry/backend/internal/http/middleware"
+	migratepkg "github.com/ferry/backend/internal/migrate"
+	"github.com/ferry/backend/migrations"
+	runspkg "github.com/ferry/backend/internal/runs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -33,6 +36,10 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer pool.Close()
+
+	if err := migratepkg.Run(context.Background(), pool, migrations.FS); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
 
 	rdb := connectRedis(cfg)
 	defer rdb.Close()
@@ -59,6 +66,7 @@ func main() {
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
 	ghAPIHandler := ghpkg.NewHandler(rdb, cfg.GitHub.PAT)
+	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService)
 
 	mux := http.NewServeMux()
 
@@ -75,6 +83,17 @@ func main() {
 	mux.Handle("/api/github/repos/suggestions", authMiddleware.Authenticate(
 		http.HandlerFunc(ghAPIHandler.ListSuggestions),
 	))
+
+	// Runs routes
+	mux.Handle("GET /api/runs", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.ListRuns)))
+	mux.Handle("POST /api/runs", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.CreateRun)))
+	mux.Handle("GET /api/runs/{id}", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.GetRun)))
+	mux.Handle("POST /api/runs/{id}/start", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.StartRun)))
+	mux.Handle("POST /api/runs/{id}/cancel", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.CancelRun)))
+	mux.Handle("POST /api/runs/{id}/rerun", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.RerunRun)))
+	mux.Handle("POST /api/runs/{id}/db-plan/approve", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.ApproveDbPlan)))
+	// SSE: auth handled inside handler (EventSource can't set headers, token via query param)
+	mux.HandleFunc("GET /api/runs/{id}/stream", runsHandler.StreamRun)
 
 	handler := corsMiddleware(cfg)(mux)
 

@@ -16,8 +16,9 @@ import {
   type TargetLanguage,
 } from "@/lib/domain"
 import {
-  resolveRepo,
+  createRun,
   fetchRepoSuggestions,
+  resolveRepo,
   type MigrationRisk,
   type RepoSuggestion,
   type ResolvedRepo,
@@ -90,6 +91,7 @@ export function RepoLauncher({ className }: { className?: string }) {
   const [source, setSource] = React.useState<SourceLanguage>("cobol")
   const [target, setTarget] = React.useState<TargetLanguage>("go")
   const [dbEnabled, setDbEnabled] = React.useState(false)
+  const [launching, setLaunching] = React.useState(false)
   const pickerRef = React.useRef<HTMLDivElement>(null)
   const seq = React.useRef(0)
 
@@ -184,12 +186,22 @@ export function RepoLauncher({ className }: { className?: string }) {
     void run(repoOption.fullName)
   }
 
-  const launch = () => {
-    if (!repo) return
-    toast.success("Migration launched", {
-      description: `${repo.owner}/${repo.name}@${branch} -> ${target === "go" ? "Go" : "Rust"}. Assembling the band.`,
-    })
-    navigate("/runs/run_7")
+  const launch = async () => {
+    if (!repo || !accessToken || launching) return
+    setLaunching(true)
+    try {
+      const result = await createRun(accessToken, `${repo.owner}/${repo.name}`, branch, source, target, dbEnabled)
+      toast.success("Migration launched", {
+        description: `${repo.owner}/${repo.name}@${branch} → ${target === "go" ? "Go" : "Rust"}. Assembling the band.`,
+      })
+      navigate(`/runs/${result.id}`)
+    } catch (err) {
+      toast.error("Failed to launch migration", {
+        description: err instanceof Error ? err.message : "Something went wrong.",
+      })
+    } finally {
+      setLaunching(false)
+    }
   }
 
   const invalid = phase === "error"
@@ -445,8 +457,8 @@ export function RepoLauncher({ className }: { className?: string }) {
                 />
               </div>
 
-              <Button onClick={launch} className="w-full">
-                Launch migration
+              <Button onClick={launch} disabled={launching} className="w-full">
+                {launching ? "Launching…" : "Launch migration"}
                 <IconArrowRight data-icon="inline-end" />
               </Button>
             </div>

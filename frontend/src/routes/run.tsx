@@ -2,7 +2,11 @@ import * as React from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { IconAlertTriangle, IconArrowLeft, IconReload } from "@tabler/icons-react"
+import {
+  IconAlertTriangle,
+  IconArrowLeft,
+  IconReload,
+} from "@tabler/icons-react"
 
 import { canApprove } from "@/lib/domain"
 import type { AgentKey, PhaseKey } from "@/lib/domain"
@@ -28,14 +32,17 @@ function RunSkeleton() {
         </div>
         <div className="mt-3 flex items-center gap-3 pb-2.5">
           {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="flex flex-1 items-center gap-3 last:flex-none">
+            <div
+              key={i}
+              className="flex flex-1 items-center gap-3 last:flex-none"
+            >
               <Skeleton className="size-7 shrink-0" />
               {i < 6 && <span className="h-px flex-1 bg-border" />}
             </div>
           ))}
         </div>
       </div>
-      <div className="grid flex-1 grid-cols-1 xl:grid-cols-[15rem_minmax(0,1fr)_22rem]">
+      <div className="grid flex-1 grid-cols-1 xl:grid-cols-[20rem_minmax(0,1fr)_30rem]">
         <div className="hidden flex-col gap-3 border-r border-border p-3 xl:flex">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-9 w-full" />
@@ -61,7 +68,8 @@ function RunNotFound() {
       <div className="flex flex-col items-center gap-3 text-center">
         <p className="text-sm font-medium">This run could not be found.</p>
         <p className="max-w-sm text-xs text-muted-foreground">
-          It may have been removed, or the link is wrong. Head back to your runs.
+          It may have been removed, or the link is wrong. Head back to your
+          runs.
         </p>
         <Button asChild size="sm" variant="outline">
           <Link to="/">
@@ -78,11 +86,19 @@ export function RunView() {
   const { runId = "" } = useParams()
   const { user } = useAuth()
   const now = useNow(1000)
-  const [selectedAgent, setSelectedAgent] = React.useState<AgentKey | null>(null)
-  const [selectedPhase, setSelectedPhase] = React.useState<PhaseKey | null>(null)
+  const [selectedAgent, setSelectedAgent] = React.useState<AgentKey | null>(
+    null
+  )
+  const [selectedPhase, setSelectedPhase] = React.useState<PhaseKey | null>(
+    null
+  )
   const [pane, setPane] = React.useState("feed")
 
-  const { data: run, isPending, isError } = useQuery({
+  const {
+    data: run,
+    isPending,
+    isError,
+  } = useQuery({
     queryKey: ["run", runId],
     queryFn: () => fetchRun(runId),
   })
@@ -90,7 +106,22 @@ export function RunView() {
   if (isPending) return <RunSkeleton />
   if (isError || !run) return <RunNotFound />
 
-  return <RunReady key={run.id} run={run} role={user!.role} now={now} {...{ selectedAgent, setSelectedAgent, selectedPhase, setSelectedPhase, pane, setPane }} />
+  return (
+    <RunReady
+      key={run.id}
+      run={run}
+      role={user!.role}
+      now={now}
+      {...{
+        selectedAgent,
+        setSelectedAgent,
+        selectedPhase,
+        setSelectedPhase,
+        pane,
+        setPane,
+      }}
+    />
+  )
 }
 
 function RunReady({
@@ -117,12 +148,16 @@ function RunReady({
   const { messages, agents, streamedIds } = useLiveRun(run)
   const liveRun = { ...run, agents, messages }
   const userCanApprove = canApprove(role)
-  const [dbApproved, setDbApproved] = React.useState(Boolean(run.dbPlan?.approvedBy))
+  const [dbApproved, setDbApproved] = React.useState(
+    Boolean(run.dbPlan?.approvedBy)
+  )
 
   const handleAction = React.useCallback(() => {
     setPane("outputs")
     requestAnimationFrame(() => {
-      document.getElementById("db-plan")?.scrollIntoView({ behavior: "smooth", block: "center" })
+      document
+        .getElementById("db-plan")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
     })
   }, [setPane])
 
@@ -176,26 +211,39 @@ function RunReady({
 
       <RunBanner run={liveRun} onAction={handleAction} />
 
-      <div className="hidden min-h-0 flex-1 xl:grid xl:grid-cols-[15rem_minmax(0,1fr)_22rem]">
+      <div className="hidden min-h-0 flex-1 xl:grid xl:grid-cols-[20rem_minmax(0,1fr)_30rem]">
         <div className="min-h-0 border-r border-border">{roster}</div>
         <div className="min-h-0 border-r border-border">{feed}</div>
         <div className="min-h-0">{outputs}</div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col xl:hidden">
-        <Tabs value={pane} onValueChange={setPane} className="flex min-h-0 flex-1 flex-col gap-0">
+        <Tabs
+          value={pane}
+          onValueChange={setPane}
+          className="flex min-h-0 flex-1 flex-col gap-0"
+        >
           <TabsList className="m-2 self-start">
             <TabsTrigger value="feed">Band room</TabsTrigger>
             <TabsTrigger value="band">The band</TabsTrigger>
             <TabsTrigger value="outputs">Outputs</TabsTrigger>
           </TabsList>
-          <TabsContent value="feed" className="min-h-0 flex-1 border-t border-border">
+          <TabsContent
+            value="feed"
+            className="min-h-0 flex-1 border-t border-border"
+          >
             {feed}
           </TabsContent>
-          <TabsContent value="band" className="min-h-0 flex-1 overflow-y-auto border-t border-border">
+          <TabsContent
+            value="band"
+            className="min-h-0 flex-1 overflow-y-auto border-t border-border"
+          >
             {roster}
           </TabsContent>
-          <TabsContent value="outputs" className="min-h-0 flex-1 overflow-y-auto border-t border-border">
+          <TabsContent
+            value="outputs"
+            className="min-h-0 flex-1 overflow-y-auto border-t border-border"
+          >
             {outputs}
           </TabsContent>
         </Tabs>
@@ -225,7 +273,11 @@ function RunBanner({
           size="sm"
           variant="outline"
           className="border-destructive/40 text-destructive hover:bg-destructive/15 hover:text-destructive"
-          onClick={() => toast("Retrying run", { description: "A new run starts from the last good commit." })}
+          onClick={() =>
+            toast("Retrying run", {
+              description: "A new run starts from the last good commit.",
+            })
+          }
         >
           <IconReload data-icon="inline-start" />
           Retry run
@@ -243,7 +295,9 @@ function RunBanner({
             <span className="font-semibold">
               {run.status === "blocked" ? "Run blocked." : "Needs rework."}
             </span>{" "}
-            <span className="text-warning/90">{blocker?.summary ?? "Waiting on a human decision."}</span>
+            <span className="text-warning/90">
+              {blocker?.summary ?? "Waiting on a human decision."}
+            </span>
           </span>
         </p>
         <Button
