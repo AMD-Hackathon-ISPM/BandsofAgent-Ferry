@@ -18,6 +18,8 @@ import (
 	"github.com/ferry/backend/internal/db"
 	ghpkg "github.com/ferry/backend/internal/github"
 	"github.com/ferry/backend/internal/http/middleware"
+	migratepkg "github.com/ferry/backend/internal/migrate"
+	"github.com/ferry/backend/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -33,6 +35,10 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer pool.Close()
+
+	if err := migratepkg.Run(context.Background(), pool, migrations.FS); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
 
 	rdb := connectRedis(cfg)
 	defer rdb.Close()
