@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { isLive } from "@/lib/domain"
 import type { AgentMessageVM, AgentRuntime, Run } from "@/lib/types"
-import { subscribeRun } from "@/lib/mock/stream"
+import { API_URL } from "@/lib/api"
 
 export function useNow(intervalMs = 1000): number {
   const [now, setNow] = React.useState(() => Date.now())
@@ -19,6 +19,16 @@ interface LiveRunState {
   streamedIds: Set<string>
 }
 
+function getStoredToken(): string {
+  try {
+    const raw = localStorage.getItem("ferry.session")
+    if (!raw) return ""
+    return JSON.parse(raw).accessToken ?? ""
+  } catch {
+    return ""
+  }
+}
+
 export function useLiveRun(run: Run): LiveRunState {
   const [messages, setMessages] = React.useState<AgentMessageVM[]>(run.messages)
   const [agents, setAgents] = React.useState<AgentRuntime[]>(run.agents)
@@ -27,22 +37,37 @@ export function useLiveRun(run: Run): LiveRunState {
   React.useEffect(() => {
     if (!isLive(run.status)) return
 
-    const unsub = subscribeRun(run.id, (msg) => {
-      setStreamedIds((prev) => new Set(prev).add(msg.id))
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]))
-      setAgents((prev) =>
-        prev.map((a) =>
-          a.key === msg.agent
-            ? {
-                ...a,
-                status: a.status === "idle" || a.status === "waiting" ? "active" : a.status,
-                lastActionAt: msg.createdAt,
-              }
-            : a,
-        ),
-      )
-    })
-    return unsub
+    const token = getStoredToken()
+    const url = `${API_URL}/api/runs/${run.id}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`
+    const es = new EventSource(url)
+
+    es.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data) as AgentMessageVM
+        setStreamedIds((prev) => new Set(prev).add(msg.id))
+        setMessages((prev) =>
+          prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
+        )
+        setAgents((prev) =>
+          prev.map((a) =>
+            a.key === msg.agent
+              ? {
+                  ...a,
+                  status:
+                    a.status === "idle" || a.status === "waiting"
+                      ? "active"
+                      : a.status,
+                  lastActionAt: msg.createdAt,
+                }
+              : a,
+          ),
+        )
+      } catch {
+        // ignore malformed SSE messages
+      }
+    }
+
+    return () => es.close()
   }, [run.id, run.status])
 
   return { messages, agents, streamedIds }
