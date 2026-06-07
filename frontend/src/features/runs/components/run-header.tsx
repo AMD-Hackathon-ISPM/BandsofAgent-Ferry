@@ -248,7 +248,7 @@ export function RunHeader({
           </div>
         </div>
 
-        <div className="mx-auto w-full max-w-7xl overflow-x-auto px-2 pb-2">
+        <div className="mx-auto w-full max-w-7xl px-2 pb-2">
           <PhasePipeline
             run={run}
             selected={selectedPhase}
