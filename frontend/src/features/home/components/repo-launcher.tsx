@@ -15,7 +15,13 @@ import {
   type SourceLanguage,
   type TargetLanguage,
 } from "@/lib/domain"
-import { resolveRepo, fetchRepoSuggestions, type ResolvedRepo } from "@/lib/api"
+import {
+  resolveRepo,
+  fetchRepoSuggestions,
+  type MigrationRisk,
+  type RepoSuggestion,
+  type ResolvedRepo,
+} from "@/lib/api"
 import { useAuth } from "@/providers/auth-provider"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -45,13 +51,29 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 type Phase = "idle" | "validating" | "resolved" | "error"
-type Reason = "format" | "access" | "unsupported"
+type Reason = "format" | "access" | "unsupported" | "threshold"
 
 const ERROR_COPY: Record<Reason, string> = {
   format: "That does not look like a GitHub repository URL.",
   access:
     "We can't reach that repository with your GitHub access. Check the URL or your permissions.",
   unsupported: "Ferry migrates COBOL, Java, and PHP.",
+  threshold:
+    "This repository is below the migration threshold and cannot be selected.",
+}
+
+const RISK_TONE: Record<MigrationRisk["level"], string> = {
+  high: "border-success/30 bg-success/10 text-success",
+  medium: "border-warning/40 bg-warning/10 text-warning",
+  low: "border-destructive/35 bg-destructive/10 text-destructive",
+  blocked: "border-border bg-muted text-muted-foreground",
+}
+
+const RISK_DOT: Record<MigrationRisk["level"], string> = {
+  high: "bg-success",
+  medium: "bg-warning",
+  low: "bg-destructive",
+  blocked: "bg-muted-foreground",
 }
 
 export function RepoLauncher({ className }: { className?: string }) {
@@ -59,7 +81,8 @@ export function RepoLauncher({ className }: { className?: string }) {
   const { accessToken } = useAuth()
   const [input, setInput] = React.useState("")
   const [repoMenuOpen, setRepoMenuOpen] = React.useState(false)
-  const [suggestions, setSuggestions] = React.useState<string[]>([])
+  const [suggestions, setSuggestions] = React.useState<RepoSuggestion[]>([])
+  const [suggestionsLoading, setSuggestionsLoading] = React.useState(false)
   const [phase, setPhase] = React.useState<Phase>("idle")
   const [reason, setReason] = React.useState<Reason | null>(null)
   const [repo, setRepo] = React.useState<ResolvedRepo | null>(null)
@@ -72,7 +95,21 @@ export function RepoLauncher({ className }: { className?: string }) {
 
   React.useEffect(() => {
     if (!accessToken) return
-    fetchRepoSuggestions(accessToken).then(setSuggestions).catch(() => {})
+    let cancelled = false
+    setSuggestionsLoading(true)
+    fetchRepoSuggestions(accessToken)
+      .then((repos) => {
+        if (!cancelled) setSuggestions(repos)
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestions([])
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestionsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [accessToken])
 
   const run = React.useCallback(
@@ -89,18 +126,24 @@ export function RepoLauncher({ className }: { className?: string }) {
       setPhase("validating")
       const result = await resolveRepo(trimmed, accessToken ?? "")
       if (ticket !== seq.current) return
-    if (!result.ok) {
-      setReason(result.reason)
-      setRepo(null)
-      setPhase("error")
-      return
-    }
-    if (result.repo.detectedLanguage === "unsupported") {
-      setReason("unsupported")
-      setRepo(result.repo)
-      setPhase("error")
-      return
-    }
+      if (!result.ok) {
+        setReason(result.reason)
+        setRepo(null)
+        setPhase("error")
+        return
+      }
+      if (result.repo.detectedLanguage === "unsupported") {
+        setReason("unsupported")
+        setRepo(result.repo)
+        setPhase("error")
+        return
+      }
+      if (!result.repo.risk.selectable) {
+        setReason("threshold")
+        setRepo(result.repo)
+        setPhase("error")
+        return
+      }
       setRepo(result.repo)
       setBranch(result.repo.defaultBranch)
       setSource(result.repo.detectedLanguage)
@@ -113,8 +156,8 @@ export function RepoLauncher({ className }: { className?: string }) {
   const repoOptions = React.useMemo(() => {
     const query = input.trim().toLowerCase()
     if (!query) return suggestions
-    return suggestions.filter((repoPath) =>
-      repoPath.toLowerCase().includes(query),
+    return suggestions.filter((repoOption) =>
+      repoOption.fullName.toLowerCase().includes(query),
     )
   }, [input, suggestions])
 
@@ -134,10 +177,11 @@ export function RepoLauncher({ className }: { className?: string }) {
       document.removeEventListener("pointerdown", closeOnOutsideClick)
   }, [])
 
-  const selectRepo = (repoPath: string) => {
-    setInput(repoPath)
+  const selectRepo = (repoOption: RepoSuggestion) => {
+    if (!repoOption.risk.selectable) return
+    setInput(repoOption.fullName)
     setRepoMenuOpen(false)
-    void run(repoPath)
+    void run(repoOption.fullName)
   }
 
   const launch = () => {
@@ -228,28 +272,56 @@ export function RepoLauncher({ className }: { className?: string }) {
                   <div className="px-2 py-1.5 text-[10px] font-medium tracking-wide text-muted-foreground">
                     GitHub repositories
                   </div>
-                  {repoOptions.length > 0 ? (
-                    repoOptions.map((repoPath) => (
+                  {suggestionsLoading ? (
+                    <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
+                      <Spinner className="size-3.5" />
+                      Loading repositories...
+                    </div>
+                  ) : repoOptions.length > 0 ? (
+                    repoOptions.map((repoOption) => (
                       <button
-                        key={repoPath}
+                        key={repoOption.fullName}
                         type="button"
                         role="option"
-                        aria-selected={input === repoPath}
-                        className="flex w-full items-center gap-2 px-2 py-2 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent"
-                        onClick={() => selectRepo(repoPath)}
+                        aria-selected={input === repoOption.fullName}
+                        aria-disabled={!repoOption.risk.selectable}
+                        disabled={!repoOption.risk.selectable}
+                        title={repoOption.risk.label}
+                        className={cn(
+                          "flex w-full items-center gap-2 px-2 py-2 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+                          !repoOption.risk.selectable && "grayscale",
+                        )}
+                        onClick={() => selectRepo(repoOption)}
                       >
                         <IconBrandGithub className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 flex-1 truncate font-mono text-foreground">
-                          {repoPath}
+                          {repoOption.fullName}
                         </span>
-                        {input === repoPath && (
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 items-center gap-1 border px-1.5 py-0.5 text-[10px] font-medium",
+                            RISK_TONE[repoOption.risk.level],
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              RISK_DOT[repoOption.risk.level],
+                            )}
+                          />
+                          {repoOption.detectedLabel || "Unknown"}{" "}
+                          {repoOption.risk.percentage}%
+                        </span>
+                        {input === repoOption.fullName && (
                           <IconCircleCheck className="size-3.5 shrink-0 text-success" />
                         )}
                       </button>
                     ))
                   ) : (
                     <div className="px-2 py-3 text-xs text-muted-foreground">
-                      Press Enter to use this repository URL.
+                      {input.trim()
+                        ? "Press Enter to use this repository URL."
+                        : "No Java, COBOL, or PHP repositories found."}
                     </div>
                   )}
                 </div>
@@ -260,6 +332,9 @@ export function RepoLauncher({ className }: { className?: string }) {
                 {ERROR_COPY[reason]}
                 {reason === "unsupported" && repo
                   ? ` This repo looks like ${repo.detectedLabel}.`
+                  : ""}
+                {reason === "threshold" && repo
+                  ? ` ${repo.detectedLabel} is ${repo.risk.percentage}%; minimum selectable threshold is above 40%.`
                   : ""}
               </FieldError>
             )}
@@ -293,6 +368,18 @@ export function RepoLauncher({ className }: { className?: string }) {
                     </SelectGroup>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-3 border px-3 py-2 text-xs",
+                  RISK_TONE[repo.risk.level],
+                )}
+              >
+                <span className="font-medium">{repo.risk.label}</span>
+                <span className="font-mono">
+                  {repo.risk.percentage}% {repo.detectedLabel}
+                </span>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
