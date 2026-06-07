@@ -21,6 +21,7 @@ export interface ResolvedRepo {
   owner: string
   name: string
   defaultBranch: string
+  branches: string[]
   detectedLanguage: "cobol" | "java" | "php" | "unsupported"
   detectedLabel: string
 }
@@ -30,6 +31,7 @@ const REPO_FIXTURES: Record<string, ResolvedRepo> = {
     owner: "northwind",
     name: "payroll-cobol",
     defaultBranch: "main",
+    branches: ["main", "release/payroll-2026", "migration-preview"],
     detectedLanguage: "cobol",
     detectedLabel: "COBOL",
   },
@@ -37,6 +39,7 @@ const REPO_FIXTURES: Record<string, ResolvedRepo> = {
     owner: "northwind",
     name: "ledger-java",
     defaultBranch: "main",
+    branches: ["main", "develop", "modernization"],
     detectedLanguage: "java",
     detectedLabel: "Java",
   },
@@ -44,6 +47,7 @@ const REPO_FIXTURES: Record<string, ResolvedRepo> = {
     owner: "northwind",
     name: "claims-php",
     defaultBranch: "trunk",
+    branches: ["trunk", "main", "claims-refactor"],
     detectedLanguage: "php",
     detectedLabel: "PHP",
   },
@@ -51,9 +55,19 @@ const REPO_FIXTURES: Record<string, ResolvedRepo> = {
     owner: "northwind",
     name: "web-dashboard",
     defaultBranch: "main",
+    branches: ["main", "develop"],
     detectedLanguage: "unsupported",
     detectedLabel: "TypeScript",
   },
+}
+
+function detectLanguageFromName(
+  name: string
+): ResolvedRepo["detectedLanguage"] {
+  const normalized = name.toLowerCase()
+  if (normalized.includes("java")) return "java"
+  if (normalized.includes("php")) return "php"
+  return "cobol"
 }
 
 export type RepoResolution =
@@ -74,12 +88,27 @@ export async function resolveRepo(input: string): Promise<RepoResolution> {
   }
   const key = `${parts[0]}/${parts[1]}`
   const repo = REPO_FIXTURES[key]
-  if (!repo) {
-    return { ok: false, reason: "access" }
+  if (repo) return { ok: true, repo }
+
+  const detectedLanguage = detectLanguageFromName(parts[1])
+  return {
+    ok: true,
+    repo: {
+      owner: parts[0],
+      name: parts[1],
+      defaultBranch: "main",
+      branches: ["main", "develop", "migration-preview"],
+      detectedLanguage,
+      detectedLabel:
+        detectedLanguage === "java"
+          ? "Java"
+          : detectedLanguage === "php"
+            ? "PHP"
+            : "COBOL",
+    },
   }
-  return { ok: true, repo }
 }
 
 export const REPO_SUGGESTIONS = Object.keys(REPO_FIXTURES).filter(
-  (k) => k !== "northwind/web-dashboard",
+  (k) => k !== "northwind/web-dashboard"
 )
