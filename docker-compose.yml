@@ -54,21 +54,6 @@ services:
     networks:
       - ferry-network
 
-  migrate:
-    image: migrate/migrate:latest
-    container_name: ferry-migrate
-    command:
-      - "-path=/migrations"
-      - "-database=postgres://ferry:ferry_dev_password@postgres:5432/ferry?sslmode=disable"
-      - "up"
-    volumes:
-      - ./backend/migrations:/migrations:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - ferry-network
-
   backend:
     build:
       context: ./backend
@@ -84,8 +69,8 @@ services:
       FRONTEND_URL: http://localhost
       GITHUB_REDIRECT_URI: http://localhost/auth/github/callback
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       minio:
