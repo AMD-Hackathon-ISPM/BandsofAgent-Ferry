@@ -75,8 +75,8 @@ export function PhasePipeline({
   const states = phaseStates(run)
 
   return (
-    <div className={cn("overflow-x-auto", className)}>
-      <ol className="mx-auto flex min-w-max items-center justify-center">
+    <div className={cn("w-full", className)}>
+      <ol className="mx-auto flex w-full items-center justify-center">
         {PHASES.map((phase, i) => {
           const state = states[i]
           const nextState = states[i + 1]
@@ -95,7 +95,7 @@ export function PhasePipeline({
                   aria-label={`${phase.label} phase, ${state}`}
                   title={phase.hint}
                   className={cn(
-                    "flex h-12 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors outline-none",
+                    "flex size-10 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors outline-none sm:h-12 sm:w-auto sm:px-4",
                     "focus-visible:ring-1 focus-visible:ring-ring",
                     interactive ? "cursor-pointer" : "cursor-default",
                     STAGE[state],
@@ -104,14 +104,14 @@ export function PhasePipeline({
                   )}
                 >
                   <StageMark phase={phase.key} state={state} />
-                  <span>{phase.short}</span>
+                  <span className="hidden sm:inline">{phase.short}</span>
                 </button>
               </li>
               {i < PHASES.length - 1 && (
                 <li
                   aria-hidden="true"
                   className={cn(
-                    "relative h-px w-14 overflow-hidden",
+                    "relative h-px min-w-2 flex-1 overflow-hidden sm:max-w-14",
                     CONNECTOR[state]
                   )}
                 >
