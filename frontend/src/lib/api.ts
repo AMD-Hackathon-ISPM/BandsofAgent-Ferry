@@ -1,22 +1,107 @@
 import type { RecentRunSummary, Run } from "@/lib/types"
-import { RECENT_RUNS, getRun } from "@/lib/mock/data"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
 
-const latency = (ms: number) => new Promise((r) => setTimeout(r, ms))
+function authHeaders(accessToken: string) {
+  return { Authorization: `Bearer ${accessToken}` }
+}
+
+function getStoredToken(): string {
+  try {
+    const raw = localStorage.getItem("ferry.session")
+    if (!raw) return ""
+    return JSON.parse(raw).accessToken ?? ""
+  } catch {
+    return ""
+  }
+}
 
 export async function fetchRecentRuns(): Promise<RecentRunSummary[]> {
-  await latency(550)
-  return RECENT_RUNS
+  const token = getStoredToken()
+  if (!token) return []
+  try {
+    const resp = await fetch(`${API_URL}/api/runs`, {
+      headers: authHeaders(token),
+    })
+    if (!resp.ok) return []
+    return (await resp.json()) as RecentRunSummary[]
+  } catch {
+    return []
+  }
 }
 
 export async function fetchRun(id: string): Promise<Run> {
-  await latency(450)
-  const run = getRun(id)
-  if (!run) {
-    throw new Error(`Run ${id} was not found.`)
+  const token = getStoredToken()
+  const resp = await fetch(`${API_URL}/api/runs/${id}`, {
+    headers: token ? authHeaders(token) : {},
+  })
+  if (resp.status === 404) throw new Error(`Run ${id} was not found.`)
+  if (!resp.ok) throw new Error(`Failed to fetch run ${id}.`)
+  return (await resp.json()) as Run
+}
+
+export interface CreateRunResult {
+  id: string
+  runNumber: number
+}
+
+export async function createRun(
+  accessToken: string,
+  repo: string,
+  branch: string,
+  sourceLanguage: string,
+  targetLanguage: string,
+  dbEnabled: boolean,
+): Promise<CreateRunResult> {
+  const resp = await fetch(`${API_URL}/api/runs`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(accessToken),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ repo, branch, sourceLanguage, targetLanguage, dbEnabled }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error((err as { error?: string }).error ?? "Failed to create run")
   }
-  return run
+  return (await resp.json()) as CreateRunResult
+}
+
+export async function startRun(accessToken: string, runId: string): Promise<void> {
+  const resp = await fetch(`${API_URL}/api/runs/${runId}/start`, {
+    method: "POST",
+    headers: authHeaders(accessToken),
+  })
+  if (!resp.ok) throw new Error("Failed to start run")
+}
+
+export async function cancelRun(accessToken: string, runId: string): Promise<void> {
+  const resp = await fetch(`${API_URL}/api/runs/${runId}/cancel`, {
+    method: "POST",
+    headers: authHeaders(accessToken),
+  })
+  if (!resp.ok) throw new Error("Failed to cancel run")
+}
+
+export async function rerunRun(
+  accessToken: string,
+  runId: string,
+): Promise<CreateRunResult> {
+  const resp = await fetch(`${API_URL}/api/runs/${runId}/rerun`, {
+    method: "POST",
+    headers: authHeaders(accessToken),
+  })
+  if (!resp.ok) throw new Error("Failed to rerun")
+  return (await resp.json()) as CreateRunResult
+}
+
+export async function approveDbPlan(accessToken: string, runId: string): Promise<void> {
+  const resp = await fetch(`${API_URL}/api/runs/${runId}/db-plan/approve`, {
+    method: "POST",
+    headers: authHeaders(accessToken),
+  })
+  if (!resp.ok) throw new Error("Failed to approve DB plan")
 }
 
 export interface ResolvedRepo {
@@ -76,3 +161,5 @@ export async function fetchRepoSuggestions(accessToken: string): Promise<string[
     return []
   }
 }
+
+export { API_URL }

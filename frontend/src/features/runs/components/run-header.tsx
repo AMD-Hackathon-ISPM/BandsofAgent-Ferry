@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   IconChevronLeft,
@@ -16,6 +17,8 @@ import type { PhaseKey, Role } from "@/lib/domain"
 import { clock, elapsed, shortSha } from "@/lib/format"
 import type { Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { startRun, cancelRun, rerunRun } from "@/lib/api"
+import { useAuth } from "@/providers/auth-provider"
 import { LangRoute } from "@/features/migrations/components/lang-route"
 import { StatusBadge } from "@/features/migrations/components/status-badge"
 import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
@@ -35,7 +38,29 @@ function RunningDots() {
 }
 
 function RunActionButton({ run }: { run: Run }) {
+  const { accessToken } = useAuth()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const live = isLive(run.status)
+
+  const startMutation = useMutation({
+    mutationFn: () => startRun(accessToken ?? "", run.id),
+    onSuccess: () => {
+      toast.success("Run started", { description: "Agents are assembling for this migration." })
+      queryClient.invalidateQueries({ queryKey: ["run", run.id] })
+    },
+    onError: () => toast.error("Failed to start run"),
+  })
+
+  const rerunMutation = useMutation({
+    mutationFn: () => rerunRun(accessToken ?? "", run.id),
+    onSuccess: (result) => {
+      toast.success("Run restarted", { description: `Run #${result.runNumber} created.` })
+      queryClient.invalidateQueries({ queryKey: ["recent-runs"] })
+      navigate(`/runs/${result.id}`)
+    },
+    onError: () => toast.error("Failed to rerun"),
+  })
 
   if (run.status === "completed") {
     return (
@@ -64,13 +89,9 @@ function RunActionButton({ run }: { run: Run }) {
     return (
       <Button
         size="lg"
+        disabled={rerunMutation.isPending}
         className="h-12 border-warning/45 bg-warning/15 px-5 text-base text-warning hover:bg-warning/25"
-        onClick={() =>
-          toast("Re-running project", {
-            description:
-              "The mock run would restart from the last saved migration state.",
-          })
-        }
+        onClick={() => rerunMutation.mutate()}
       >
         <IconRefresh data-icon="inline-start" />
         Re run
@@ -102,12 +123,9 @@ function RunActionButton({ run }: { run: Run }) {
   return (
     <Button
       size="lg"
+      disabled={startMutation.isPending}
       className="h-12 border-primary/45 bg-primary px-5 text-base text-primary-foreground hover:bg-primary/85"
-      onClick={() =>
-        toast.success("Run started", {
-          description: "The mock agents are assembling for this migration.",
-        })
-      }
+      onClick={() => startMutation.mutate()}
     >
       <IconPlayerPlay data-icon="inline-start" />
       Run
@@ -131,11 +149,22 @@ export function RunHeader({
   onSelectPhase?: (phase: PhaseKey | null) => void
   className?: string
 }) {
+  const { accessToken } = useAuth()
+  const queryClient = useQueryClient()
   const live = isLive(run.status)
   const showCancel = live && canCancelRole(role)
   const timer = live
     ? clock(run.startedAt, undefined, now)
     : elapsed(run.startedAt, run.completedAt, now)
+
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelRun(accessToken ?? "", run.id),
+    onSuccess: () => {
+      toast.success("Run cancelled")
+      queryClient.invalidateQueries({ queryKey: ["run", run.id] })
+    },
+    onError: () => toast.error("Failed to cancel run"),
+  })
 
   return (
     <header className={cn("border-b border-border bg-background", className)}>
@@ -199,6 +228,7 @@ export function RunHeader({
               <Button
                 size="icon-lg"
                 variant="outline"
+                disabled={cancelMutation.isPending}
                 className="size-12 border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
                 aria-label="Cancel run"
                 onClick={() =>
@@ -206,7 +236,7 @@ export function RunHeader({
                     description: "The band will stop after the current step.",
                     action: {
                       label: "Cancel run",
-                      onClick: () => toast.success("Run cancelled"),
+                      onClick: () => cancelMutation.mutate(),
                     },
                   })
                 }
