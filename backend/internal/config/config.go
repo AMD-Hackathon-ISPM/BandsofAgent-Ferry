@@ -15,6 +15,7 @@ type Config struct {
 	JWT      JWTConfig
 	Band     BandConfig
 	Model    ModelConfig
+	Agents   AgentsConfig
 	GitHub   GitHubConfig
 	Logging  LoggingConfig
 	CORS     CORSConfig
@@ -104,6 +105,66 @@ type FeatureFlags struct {
 	EnableRealBand          bool
 }
 
+// APISourceConfig holds credentials for one OpenAI-compatible LLM gateway.
+type APISourceConfig struct {
+	BaseURL string
+	APIKey  string
+}
+
+// AgentModelConfig pins a specific model and API source for one agent.
+type AgentModelConfig struct {
+	Model  string
+	Source string // "aimlapi" or "featherless"
+}
+
+// AgentsConfig holds the two API sources and per-agent model assignments.
+type AgentsConfig struct {
+	Sources map[string]APISourceConfig // keyed by source name
+
+	Router          AgentModelConfig
+	SourceAnalyzer  AgentModelConfig
+	BusinessLogic   AgentModelConfig
+	CodeGenerator   AgentModelConfig
+	DbMigration     AgentModelConfig
+	TestGenerator   AgentModelConfig
+	Reviewer        AgentModelConfig
+	Commander       AgentModelConfig
+	GithubConnector AgentModelConfig
+}
+
+// ForAgent returns the (baseURL, apiKey, model) for the given agent key.
+// Falls back to the aimlapi source if the named source is not configured.
+func (ac *AgentsConfig) ForAgent(agentKey string) (baseURL, apiKey, model string) {
+	var cfg AgentModelConfig
+	switch agentKey {
+	case "router":
+		cfg = ac.Router
+	case "source_analyzer":
+		cfg = ac.SourceAnalyzer
+	case "business_logic":
+		cfg = ac.BusinessLogic
+	case "code_generator":
+		cfg = ac.CodeGenerator
+	case "db_migration":
+		cfg = ac.DbMigration
+	case "test_generator":
+		cfg = ac.TestGenerator
+	case "reviewer":
+		cfg = ac.Reviewer
+	case "commander":
+		cfg = ac.Commander
+	case "github_connector":
+		cfg = ac.GithubConnector
+	default:
+		cfg = ac.Router
+	}
+	src, ok := ac.Sources[cfg.Source]
+	if !ok {
+		src = ac.Sources["aimlapi"]
+	}
+	return src.BaseURL, src.APIKey, cfg.Model
+}
+
 func Load() (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
@@ -177,6 +238,56 @@ func Load() (*Config, error) {
 			EnableDBMigration:       getEnvAsBool("ENABLE_DB_MIGRATION", true),
 			EnableGitHubIntegration: getEnvAsBool("ENABLE_GITHUB_INTEGRATION", true),
 			EnableRealBand:          getEnvAsBool("ENABLE_REAL_BAND", false),
+		},
+		Agents: AgentsConfig{
+			Sources: map[string]APISourceConfig{
+				"aimlapi": {
+					BaseURL: getEnv("AIMLAPI_BASE_URL", "https://api.aimlapi.com/v1"),
+					APIKey:  getEnv("AIMLAPI_KEY", ""),
+				},
+				"featherless": {
+					BaseURL: getEnv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"),
+					APIKey:  getEnv("FEATHERLESS_KEY", ""),
+				},
+			},
+			// --- non-volatile agents (cheap model, aimlapi) ---
+			Router: AgentModelConfig{
+				Model:  getEnv("AGENT_ROUTER_MODEL", "deepseek/deepseek-chat-v3.1"),
+				Source: getEnv("AGENT_ROUTER_SOURCE", "aimlapi"),
+			},
+			Commander: AgentModelConfig{
+				Model:  getEnv("AGENT_COMMANDER_MODEL", "deepseek/deepseek-chat-v3.1"),
+				Source: getEnv("AGENT_COMMANDER_SOURCE", "aimlapi"),
+			},
+			TestGenerator: AgentModelConfig{
+				Model:  getEnv("AGENT_TEST_GENERATOR_MODEL", "deepseek/deepseek-chat-v3.1"),
+				Source: getEnv("AGENT_TEST_GENERATOR_SOURCE", "aimlapi"),
+			},
+			GithubConnector: AgentModelConfig{
+				Model:  getEnv("AGENT_GITHUB_CONNECTOR_MODEL", "deepseek/deepseek-chat-v3.1"),
+				Source: getEnv("AGENT_GITHUB_CONNECTOR_SOURCE", "aimlapi"),
+			},
+			// --- pivotal agents (reasoning model, featherless) ---
+			SourceAnalyzer: AgentModelConfig{
+				Model:  getEnv("AGENT_SOURCE_ANALYZER_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
+				Source: getEnv("AGENT_SOURCE_ANALYZER_SOURCE", "featherless"),
+			},
+			BusinessLogic: AgentModelConfig{
+				Model:  getEnv("AGENT_BUSINESS_LOGIC_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
+				Source: getEnv("AGENT_BUSINESS_LOGIC_SOURCE", "featherless"),
+			},
+			CodeGenerator: AgentModelConfig{
+				Model:  getEnv("AGENT_CODE_GENERATOR_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
+				Source: getEnv("AGENT_CODE_GENERATOR_SOURCE", "featherless"),
+			},
+			DbMigration: AgentModelConfig{
+				Model:  getEnv("AGENT_DB_MIGRATION_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
+				Source: getEnv("AGENT_DB_MIGRATION_SOURCE", "featherless"),
+			},
+			Reviewer: AgentModelConfig{
+				Model:  getEnv("AGENT_REVIEWER_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
+				Source: getEnv("AGENT_REVIEWER_SOURCE", "featherless"),
+			},
 		},
 	}
 
