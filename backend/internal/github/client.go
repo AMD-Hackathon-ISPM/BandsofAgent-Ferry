@@ -7,18 +7,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 )
 
 var ErrNotFound = errors.New("repository not found")
 
 type RepoInfo struct {
-	Owner            string   `json:"owner"`
-	Name             string   `json:"name"`
-	DefaultBranch    string   `json:"defaultBranch"`
-	Branches         []string `json:"branches"`
-	Language         string   `json:"language"`
-	DetectedLanguage string   `json:"detectedLanguage"`
-	DetectedLabel    string   `json:"detectedLabel"`
+	Owner            string         `json:"owner"`
+	Name             string         `json:"name"`
+	DefaultBranch    string         `json:"defaultBranch"`
+	Branches         []string       `json:"branches"`
+	Language         string         `json:"language"`
+	DetectedLanguage string         `json:"detectedLanguage"`
+	DetectedLabel    string         `json:"detectedLabel"`
+	Risk             MigrationRisk  `json:"risk"`
+	Languages        map[string]int `json:"languages"`
+}
+
+type MigrationRisk struct {
+	Percentage int    `json:"percentage"`
+	Level      string `json:"level"`
+	Label      string `json:"label"`
+	Selectable bool   `json:"selectable"`
+}
+
+type RepoSuggestion struct {
+	FullName         string        `json:"fullName"`
+	DetectedLanguage string        `json:"detectedLanguage"`
+	DetectedLabel    string        `json:"detectedLabel"`
+	Risk             MigrationRisk `json:"risk"`
 }
 
 type Client struct {
@@ -98,7 +115,18 @@ func (c *Client) ResolveRepo(ctx context.Context, owner, name string) (*RepoInfo
 	if repo.Language != nil {
 		lang = *repo.Language
 	}
-	detected, label := detectLanguage(lang)
+	languages, err := c.fetchLanguages(ctx, owner, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch languages: %w", err)
+	}
+	detected, label, percentage := detectRepoLanguage(lang, languages)
+	risk := calculateMigrationRisk(percentage)
+	if detected == "unsupported" {
+		risk.Label = "Unsupported language"
+		risk.Selectable = false
+	} else if !risk.Selectable {
+		risk.Label = fmt.Sprintf("Below 40%% %s language share", label)
+	}
 
 	return &RepoInfo{
 		Owner:            repo.Owner.Login,
@@ -108,11 +136,13 @@ func (c *Client) ResolveRepo(ctx context.Context, owner, name string) (*RepoInfo
 		Language:         lang,
 		DetectedLanguage: detected,
 		DetectedLabel:    label,
+		Risk:             risk,
+		Languages:        languages,
 	}, nil
 }
 
-func (c *Client) ListUserRepos(ctx context.Context) ([]string, error) {
-	body, status, err := c.get(ctx, "/user/repos?per_page=100&sort=updated&type=all")
+func (c *Client) ListUserRepos(ctx context.Context) ([]RepoSuggestion, error) {
+	body, status, err := c.get(ctx, "/user/repos?per_page=100&sort=updated&affiliation=owner")
 	if err != nil {
 		return nil, err
 	}
@@ -125,18 +155,104 @@ func (c *Client) ListUserRepos(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	var suggestions []string
-	for _, r := range repos {
-		lang := ""
-		if r.Language != nil {
-			lang = *r.Language
-		}
-		detected, _ := detectLanguage(lang)
-		if detected != "unsupported" {
-			suggestions = append(suggestions, r.FullName)
+	suggestions := make([]RepoSuggestion, len(repos))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+
+	for i, repo := range repos {
+		wg.Add(1)
+		go func(i int, r ghRepo) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			lang := ""
+			if r.Language != nil {
+				lang = *r.Language
+			}
+			languages, err := c.fetchLanguages(ctx, r.Owner.Login, r.Name)
+			if err != nil {
+				languages = map[string]int{}
+			}
+			detected, label, percentage := detectRepoLanguage(lang, languages)
+			risk := calculateMigrationRisk(percentage)
+			if detected == "unsupported" {
+				return
+			} else if !risk.Selectable {
+				risk.Label = fmt.Sprintf("Below 40%% %s language share", label)
+			}
+			suggestions[i] = RepoSuggestion{
+				FullName:         r.FullName,
+				DetectedLanguage: detected,
+				DetectedLabel:    label,
+				Risk:             risk,
+			}
+		}(i, repo)
+	}
+	wg.Wait()
+
+	filtered := suggestions[:0]
+	for _, suggestion := range suggestions {
+		if suggestion.FullName != "" {
+			filtered = append(filtered, suggestion)
 		}
 	}
-	return suggestions, nil
+	return filtered, nil
+}
+
+func (c *Client) fetchLanguages(ctx context.Context, owner, name string) (map[string]int, error) {
+	body, status, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/languages", owner, name))
+	if err != nil {
+		return nil, err
+	}
+	if status == 404 {
+		return nil, ErrNotFound
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("github returned status %d", status)
+	}
+
+	var languages map[string]int
+	if err := json.Unmarshal(body, &languages); err != nil {
+		return nil, err
+	}
+	return languages, nil
+}
+
+func detectRepoLanguage(ghLang string, languages map[string]int) (string, string, int) {
+	total := 0
+	for _, bytes := range languages {
+		total += bytes
+	}
+	if total == 0 {
+		detected, label := detectLanguage(ghLang)
+		return detected, label, 0
+	}
+
+	type candidate struct {
+		key   string
+		label string
+		bytes int
+	}
+
+	candidates := []candidate{
+		{key: "java", label: "Java", bytes: languages["Java"]},
+		{key: "cobol", label: "COBOL", bytes: languages["COBOL"]},
+		{key: "php", label: "PHP", bytes: languages["PHP"]},
+	}
+
+	best := candidate{key: "unsupported", label: ghLang}
+	for _, c := range candidates {
+		if c.bytes > best.bytes {
+			best = c
+		}
+	}
+	if best.bytes == 0 {
+		detected, label := detectLanguage(ghLang)
+		return detected, label, 0
+	}
+
+	return best.key, best.label, int(float64(best.bytes)/float64(total)*100 + 0.5)
 }
 
 func detectLanguage(ghLang string) (string, string) {
@@ -149,5 +265,38 @@ func detectLanguage(ghLang string) (string, string) {
 		return "php", "PHP"
 	default:
 		return "unsupported", ghLang
+	}
+}
+
+func calculateMigrationRisk(percentage int) MigrationRisk {
+	switch {
+	case percentage >= 75:
+		return MigrationRisk{
+			Percentage: percentage,
+			Level:      "high",
+			Label:      "High probability of success",
+			Selectable: true,
+		}
+	case percentage >= 50:
+		return MigrationRisk{
+			Percentage: percentage,
+			Level:      "medium",
+			Label:      "Proceed with caution",
+			Selectable: true,
+		}
+	case percentage > 40:
+		return MigrationRisk{
+			Percentage: percentage,
+			Level:      "low",
+			Label:      "Most likely unsuccessful",
+			Selectable: true,
+		}
+	default:
+		return MigrationRisk{
+			Percentage: percentage,
+			Level:      "blocked",
+			Label:      "Below migration threshold",
+			Selectable: false,
+		}
 	}
 }

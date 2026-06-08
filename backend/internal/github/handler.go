@@ -58,7 +58,7 @@ func (h *Handler) ListSuggestions(w http.ResponseWriter, r *http.Request) {
 
 	suggestions, err := client.ListUserRepos(r.Context())
 	if err != nil || len(suggestions) == 0 {
-		writeJSON(w, http.StatusOK, []string{})
+		writeJSON(w, http.StatusOK, []RepoSuggestion{})
 		return
 	}
 

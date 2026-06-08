@@ -111,11 +111,27 @@ export interface ResolvedRepo {
   branches: string[]
   detectedLanguage: "cobol" | "java" | "php" | "unsupported"
   detectedLabel: string
+  risk: MigrationRisk
+  languages?: Record<string, number>
 }
 
 export type RepoResolution =
   | { ok: true; repo: ResolvedRepo }
   | { ok: false; reason: "format" | "access" }
+
+export interface MigrationRisk {
+  percentage: number
+  level: "high" | "medium" | "low" | "blocked"
+  label: string
+  selectable: boolean
+}
+
+export interface RepoSuggestion {
+  fullName: string
+  detectedLanguage: ResolvedRepo["detectedLanguage"]
+  detectedLabel: string
+  risk: MigrationRisk
+}
 
 function parseRepoInput(input: string): string | null {
   const match = input
@@ -139,7 +155,10 @@ export async function resolveRepo(
   try {
     const resp = await fetch(
       `${API_URL}/api/github/repos/resolve?repo=${encodeURIComponent(key)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
     )
     if (resp.status === 404) return { ok: false, reason: "access" }
     if (!resp.ok) return { ok: false, reason: "access" }
@@ -150,13 +169,31 @@ export async function resolveRepo(
   }
 }
 
-export async function fetchRepoSuggestions(accessToken: string): Promise<string[]> {
+export async function fetchRepoSuggestions(
+  accessToken: string,
+): Promise<RepoSuggestion[]> {
   try {
     const resp = await fetch(`${API_URL}/api/github/repos/suggestions`, {
+      cache: "no-store",
       headers: { Authorization: `Bearer ${accessToken}` },
     })
-    if (!resp.ok) return []
-    return (await resp.json()) as string[]
+    if (!resp.ok) throw new Error(`repo suggestions failed: ${resp.status}`)
+    const suggestions = (await resp.json()) as Array<string | RepoSuggestion>
+    return suggestions.map((suggestion) =>
+      typeof suggestion === "string"
+        ? {
+            fullName: suggestion,
+            detectedLanguage: "unsupported",
+            detectedLabel: "Unknown",
+            risk: {
+              percentage: 0,
+              level: "blocked",
+              label: "Calculating risk",
+              selectable: true,
+            },
+          }
+        : suggestion,
+    )
   } catch {
     return []
   }
