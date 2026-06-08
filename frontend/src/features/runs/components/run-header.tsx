@@ -1,3 +1,4 @@
+import * as React from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -37,11 +38,12 @@ function RunningDots() {
   )
 }
 
-function RunActionButton({ run }: { run: Run }) {
+function RunActionButton({ run, role }: { run: Run; role: Role }) {
   const { accessToken } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const live = isLive(run.status)
+  const [cancelHover, setCancelHover] = React.useState(false)
 
   const startMutation = useMutation({
     mutationFn: () => startRun(accessToken ?? "", run.id),
@@ -60,6 +62,15 @@ function RunActionButton({ run }: { run: Run }) {
       navigate(`/runs/${result.id}`)
     },
     onError: () => toast.error("Failed to rerun"),
+  })
+
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelRun(accessToken ?? "", run.id),
+    onSuccess: () => {
+      toast.success("Run cancelled")
+      queryClient.invalidateQueries({ queryKey: ["run", run.id] })
+    },
+    onError: () => toast.error("Failed to cancel run"),
   })
 
   if (run.status === "completed") {
@@ -100,22 +111,48 @@ function RunActionButton({ run }: { run: Run }) {
   }
 
   if (live) {
+    const canCancel = canCancelRole(role)
+    const showingCancel = cancelHover && canCancel
+
     return (
       <Button
         size="lg"
-        className="h-12 border-warning/45 bg-warning/15 px-5 text-base text-warning hover:bg-warning/20"
-        onClick={() =>
-          toast("Run already in progress", {
-            description: "Agents are still working through the current stage.",
-          })
-        }
+        disabled={cancelMutation.isPending}
+        className={cn(
+          "h-12 min-w-36 px-5 text-base transition-colors duration-150",
+          showingCancel
+            ? "border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20"
+            : "border-warning/45 bg-warning/15 text-warning hover:bg-warning/20",
+        )}
+        onMouseEnter={() => setCancelHover(true)}
+        onMouseLeave={() => setCancelHover(false)}
+        onClick={() => {
+          if (showingCancel) {
+            toast("Cancel this run?", {
+              description: "The band will stop after the current step.",
+              action: {
+                label: "Cancel run",
+                onClick: () => cancelMutation.mutate(),
+              },
+            })
+          }
+        }}
       >
-        <span
-          className="dot-pulse size-3 rounded-[3px] bg-warning"
-          aria-hidden="true"
-        />
-        Running
-        <RunningDots />
+        {showingCancel ? (
+          <>
+            <IconX data-icon="inline-start" />
+            Cancel
+          </>
+        ) : (
+          <>
+            <span
+              className="dot-pulse size-3 rounded-[3px] bg-warning"
+              aria-hidden="true"
+            />
+            Running
+            <RunningDots />
+          </>
+        )}
       </Button>
     )
   }
@@ -149,22 +186,10 @@ export function RunHeader({
   onSelectPhase?: (phase: PhaseKey | null) => void
   className?: string
 }) {
-  const { accessToken } = useAuth()
-  const queryClient = useQueryClient()
   const live = isLive(run.status)
-  const showCancel = live && canCancelRole(role)
   const timer = live
     ? clock(run.startedAt, undefined, now)
     : elapsed(run.startedAt, run.completedAt, now)
-
-  const cancelMutation = useMutation({
-    mutationFn: () => cancelRun(accessToken ?? "", run.id),
-    onSuccess: () => {
-      toast.success("Run cancelled")
-      queryClient.invalidateQueries({ queryKey: ["run", run.id] })
-    },
-    onError: () => toast.error("Failed to cancel run"),
-  })
 
   return (
     <header className={cn("border-b border-border bg-background", className)}>
@@ -224,27 +249,7 @@ export function RunHeader({
           </div>
 
           <div className="flex shrink-0 items-center gap-3">
-            {showCancel && (
-              <Button
-                size="icon-lg"
-                variant="outline"
-                disabled={cancelMutation.isPending}
-                className="size-12 border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
-                aria-label="Cancel run"
-                onClick={() =>
-                  toast("Cancel this run?", {
-                    description: "The band will stop after the current step.",
-                    action: {
-                      label: "Cancel run",
-                      onClick: () => cancelMutation.mutate(),
-                    },
-                  })
-                }
-              >
-                <IconX className="size-6" />
-              </Button>
-            )}
-            <RunActionButton run={run} />
+            <RunActionButton run={run} role={role} />
           </div>
         </div>
 

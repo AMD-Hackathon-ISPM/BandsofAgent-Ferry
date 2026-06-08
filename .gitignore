@@ -1,5 +1,6 @@
 .env
 **/.env
+**/.en.env
 node_modules/
 *.md
 !README.md
