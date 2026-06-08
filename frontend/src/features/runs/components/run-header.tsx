@@ -10,7 +10,6 @@ import {
   IconGitCommit,
   IconPlayerPlay,
   IconRefresh,
-  IconX,
 } from "@tabler/icons-react"
 
 import { canCancel as canCancelRole, isLive } from "@/lib/domain"
@@ -24,6 +23,8 @@ import { LangRoute } from "@/features/migrations/components/lang-route"
 import { StatusBadge } from "@/features/migrations/components/status-badge"
 import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
 import { Button } from "@/components/ui/button"
+
+const ACTION_BUTTON_CLASS = "h-12 w-40 justify-center px-5 text-base"
 
 function RunningDots() {
   return (
@@ -43,12 +44,23 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const live = isLive(run.status)
-  const [cancelHover, setCancelHover] = React.useState(false)
+  const [stopToastId, setStopToastId] = React.useState<string | number | null>(
+    null
+  )
+
+  React.useEffect(() => {
+    if (!live && stopToastId !== null) {
+      toast.dismiss(stopToastId)
+      setStopToastId(null)
+    }
+  }, [live, stopToastId])
 
   const startMutation = useMutation({
     mutationFn: () => startRun(accessToken ?? "", run.id),
     onSuccess: () => {
-      toast.success("Run started", { description: "Agents are assembling for this migration." })
+      toast.success("Run started", {
+        description: "Agents are assembling for this migration.",
+      })
       queryClient.invalidateQueries({ queryKey: ["run", run.id] })
     },
     onError: () => toast.error("Failed to start run"),
@@ -57,7 +69,9 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   const rerunMutation = useMutation({
     mutationFn: () => rerunRun(accessToken ?? "", run.id),
     onSuccess: (result) => {
-      toast.success("Run restarted", { description: `Run #${result.runNumber} created.` })
+      toast.success("Run restarted", {
+        description: `Run #${result.runNumber} created.`,
+      })
       queryClient.invalidateQueries({ queryKey: ["recent-runs"] })
       navigate(`/runs/${result.id}`)
     },
@@ -68,16 +82,60 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
     mutationFn: () => cancelRun(accessToken ?? "", run.id),
     onSuccess: () => {
       toast.success("Run cancelled")
+      setStopToastId(null)
       queryClient.invalidateQueries({ queryKey: ["run", run.id] })
     },
-    onError: () => toast.error("Failed to cancel run"),
+    onError: () => {
+      setStopToastId(null)
+      toast.error("Failed to cancel run")
+    },
   })
+  const isStopPending = stopToastId !== null || cancelMutation.isPending
+
+  function requestStopRun() {
+    if (isStopPending) return
+
+    if (!canCancelRole(role)) {
+      toast.error("You cannot stop this run", {
+        description: "Only owners, admins, and engineers can terminate a run.",
+      })
+      return
+    }
+
+    let toastId: string | number
+    toastId = toast("Stop this run?", {
+      description: "The band will stop after the current step.",
+      duration: Infinity,
+      action: {
+        label: "Stop run",
+        onClick: () => {
+          toast.dismiss(toastId)
+          setStopToastId(null)
+          cancelMutation.mutate()
+        },
+      },
+      cancel: {
+        label: "Keep running",
+        onClick: () => {
+          toast.dismiss(toastId)
+          setStopToastId(null)
+        },
+      },
+      onDismiss: () => setStopToastId(null),
+      onAutoClose: () => setStopToastId(null),
+    })
+
+    setStopToastId(toastId)
+  }
 
   if (run.status === "completed") {
     return (
       <Button
         size="lg"
-        className="h-12 border-success/40 bg-success/15 px-5 text-base text-success hover:bg-success/20"
+        className={cn(
+          ACTION_BUTTON_CLASS,
+          "border-success/40 bg-success/15 text-success hover:bg-success/20"
+        )}
         onClick={() =>
           toast.success("Migration succeeded", {
             description: run.pr
@@ -101,7 +159,10 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
       <Button
         size="lg"
         disabled={rerunMutation.isPending}
-        className="h-12 border-warning/45 bg-warning/15 px-5 text-base text-warning hover:bg-warning/25"
+        className={cn(
+          ACTION_BUTTON_CLASS,
+          "border-warning/45 bg-warning/15 text-warning hover:bg-warning/25"
+        )}
         onClick={() => rerunMutation.mutate()}
       >
         <IconRefresh data-icon="inline-start" />
@@ -111,37 +172,26 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   }
 
   if (live) {
-    const canCancel = canCancelRole(role)
-    const showingCancel = cancelHover && canCancel
-
     return (
       <Button
         size="lg"
         disabled={cancelMutation.isPending}
         className={cn(
-          "h-12 min-w-36 px-5 text-base transition-colors duration-150",
-          showingCancel
+          ACTION_BUTTON_CLASS,
+          isStopPending
             ? "border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20"
-            : "border-warning/45 bg-warning/15 text-warning hover:bg-warning/20",
+            : "border-warning/45 bg-warning/15 text-warning hover:bg-warning/20"
         )}
-        onMouseEnter={() => setCancelHover(true)}
-        onMouseLeave={() => setCancelHover(false)}
-        onClick={() => {
-          if (showingCancel) {
-            toast("Cancel this run?", {
-              description: "The band will stop after the current step.",
-              action: {
-                label: "Cancel run",
-                onClick: () => cancelMutation.mutate(),
-              },
-            })
-          }
-        }}
+        onClick={requestStopRun}
       >
-        {showingCancel ? (
+        {isStopPending ? (
           <>
-            <IconX data-icon="inline-start" />
-            Cancel
+            <span
+              className="dot-pulse size-3 rounded-[3px] bg-destructive"
+              aria-hidden="true"
+            />
+            Stopping
+            <RunningDots />
           </>
         ) : (
           <>
@@ -161,7 +211,10 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
     <Button
       size="lg"
       disabled={startMutation.isPending}
-      className="h-12 border-primary/45 bg-primary px-5 text-base text-primary-foreground hover:bg-primary/85"
+      className={cn(
+        ACTION_BUTTON_CLASS,
+        "border-primary/45 bg-primary text-primary-foreground hover:bg-primary/85"
+      )}
       onClick={() => startMutation.mutate()}
     >
       <IconPlayerPlay data-icon="inline-start" />
