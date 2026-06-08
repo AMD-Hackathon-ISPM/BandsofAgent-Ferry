@@ -3,31 +3,46 @@ package band
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/ferry/backend/internal/config"
 )
 
 type Service struct {
-	adapter Adapter
+	adapter Adapter      // legacy in-memory adapter (used by dev/stub paths)
+	client  *AgentClient // real Band Agent API client (acts as Router); nil in stub mode
 	config  *config.BandConfig
 }
 
 func NewService(cfg *config.BandConfig) (*Service, error) {
-	var adapter Adapter
-
-	switch cfg.Provider {
-	case "stub":
-		adapter = NewStubAdapter()
-	case "http":
-		return nil, fmt.Errorf("HTTP adapter not yet implemented")
-	default:
-		adapter = NewStubAdapter()
+	s := &Service{
+		adapter: NewStubAdapter(),
+		config:  cfg,
 	}
 
-	return &Service{
-		adapter: adapter,
-		config:  cfg,
-	}, nil
+	switch cfg.Provider {
+	case "band", "http":
+		if cfg.BaseURL == "" {
+			return nil, fmt.Errorf("BAND_BASE_URL is required when BAND_PROVIDER=%s", cfg.Provider)
+		}
+		routerKey := cfg.Agent("router").APIKey
+		if routerKey == "" {
+			return nil, fmt.Errorf("BAND_ROUTER_KEY (Router agent band_a_ key) is required when BAND_PROVIDER=%s", cfg.Provider)
+		}
+		// The backend orchestrates by acting as the Router agent.
+		s.client = NewAgentClient(cfg.BaseURL+"/agent", routerKey)
+	case "stub":
+		// in-memory only
+	default:
+		// default to stub for safety
+	}
+
+	return s, nil
+}
+
+// Namespace returns the configured Band agent namespace (e.g. "dxs16823").
+func (s *Service) Namespace() string {
+	return s.config.AgentNamespace
 }
 
 func (s *Service) CreateRoom(ctx context.Context, req CreateRoomRequest) (*Room, error) {
@@ -104,4 +119,84 @@ func (s *Service) RecordDecision(ctx context.Context, decision Decision) error {
 
 func (s *Service) GetDecisions(ctx context.Context, roomID string) ([]Decision, error) {
 	return s.adapter.GetDecisions(ctx, roomID)
+}
+
+// --- Ferry high-level orchestration ----------------------------------------
+// These are the only Band operations the backend performs for a migration run:
+// create the chat, add the agent participants, and post ONE kickoff message
+// addressed to the Router. After that, all collaboration happens inside Band
+// between the agents themselves — the backend does NOT orchestrate execution.
+
+// StartFerryBandRoom performs the full kickoff sequence for a migration run.
+// The backend acts as the Router agent and:
+//  1. creates the chat (Router is auto-added as a participant)
+//  2. adds the other 8 agents as participants (by Band agent id)
+//  3. posts a single kickoff message @mentioning those 8 agents
+//
+// After this, all collaboration happens inside Band between the agents
+// themselves. Returns the created Band chat id. In stub mode it returns a
+// simulated id so local dev works without hitting Band.
+func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (string, error) {
+	namespace := s.config.AgentNamespace
+	roster := s.roster()
+
+	// Stub mode: simulate via the in-memory adapter so dev flows still work.
+	if s.client == nil {
+		room, err := s.adapter.CreateRoom(ctx, CreateRoomRequest{
+			CompanyID:      rc.CompanyID,
+			ProjectID:      rc.ProjectID,
+			MigrationRunID: rc.MigrationRunID,
+			Name:           rc.RoomName(),
+		})
+		if err != nil {
+			return "", fmt.Errorf("create stub room: %w", err)
+		}
+		for _, a := range roster {
+			_ = s.adapter.RegisterAgent(ctx, room.ID, a.Handle, a.Capabilities)
+		}
+		return room.ID, nil
+	}
+
+	// Real Band Agent API (acting as the Router).
+	chatID, err := s.client.CreateChat(ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("create band chat: %w", err)
+	}
+
+	// Add and @mention the 8 non-Router agents (the Router is the author).
+	mentions := make([]Mention, 0, len(roster))
+	for _, a := range roster {
+		if a.Key == "router" {
+			continue
+		}
+		if a.ID == "" {
+			return "", fmt.Errorf("missing Band agent id for %q (set BAND_%s_ID)", a.Key, strings.ToUpper(a.Key))
+		}
+		if err := s.client.AddParticipant(ctx, chatID, a.ID); err != nil {
+			return "", fmt.Errorf("add participant %s: %w", a.Handle, err)
+		}
+		mentions = append(mentions, Mention{ID: a.ID, Name: a.Name, Handle: a.Handle})
+	}
+
+	if _, err := s.client.SendMessage(ctx, chatID, BuildKickoffMessage(rc, namespace), mentions); err != nil {
+		return "", fmt.Errorf("send kickoff: %w", err)
+	}
+
+	return chatID, nil
+}
+
+// rosterAgent is a FerryAgent enriched with its Band id from config.
+type rosterAgent struct {
+	FerryAgent
+	ID string
+}
+
+// roster returns all 9 agents with handles (from namespace) and ids (from config).
+func (s *Service) roster() []rosterAgent {
+	agents := FerryAgents(s.config.AgentNamespace)
+	out := make([]rosterAgent, len(agents))
+	for i, a := range agents {
+		out[i] = rosterAgent{FerryAgent: a, ID: s.config.Agent(a.Key).ID}
+	}
+	return out
 }

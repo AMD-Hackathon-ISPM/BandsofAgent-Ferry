@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -66,9 +67,26 @@ type JWTConfig struct {
 }
 
 type BandConfig struct {
-	Provider string
-	BaseURL  string
-	APIKey   string
+	Provider       string
+	BaseURL        string
+	APIKey         string
+	AgentNamespace string // e.g. "dxs16823" — used to build @namespace/handle agent handles
+	// Agents holds each agent's Band identity (id + per-agent X-API-Key),
+	// keyed by internal agent key (router, source_analyzer, ...).
+	Agents map[string]BandAgentIdentity
+}
+
+// BandAgentIdentity is one agent's Band credentials. Band has NO central key —
+// every agent authenticates with its own X-API-Key.
+type BandAgentIdentity struct {
+	Key    string // internal key (router, commander, ...)
+	ID     string // Band agent UUID (used in @mentions and participant adds)
+	APIKey string // Band X-API-Key for this agent
+}
+
+// Agent returns the Band identity for an internal agent key (zero value if unset).
+func (b *BandConfig) Agent(key string) BandAgentIdentity {
+	return b.Agents[key]
 }
 
 type ModelConfig struct {
@@ -121,6 +139,11 @@ type AgentModelConfig struct {
 type AgentsConfig struct {
 	Sources map[string]APISourceConfig // keyed by source name
 
+	// MaxConcurrency bounds simultaneous LLM requests across all agents.
+	// Providers cap concurrency per plan (e.g. Featherless reasoning models
+	// allow only 2 concurrent), so keep this at or below the tightest limit.
+	MaxConcurrency int
+
 	Router          AgentModelConfig
 	SourceAnalyzer  AgentModelConfig
 	BusinessLogic   AgentModelConfig
@@ -132,37 +155,44 @@ type AgentsConfig struct {
 	GithubConnector AgentModelConfig
 }
 
-// ForAgent returns the (baseURL, apiKey, model) for the given agent key.
-// Falls back to the aimlapi source if the named source is not configured.
-func (ac *AgentsConfig) ForAgent(agentKey string) (baseURL, apiKey, model string) {
-	var cfg AgentModelConfig
+// agentByKey resolves the per-agent model config for an internal agent key.
+func (ac *AgentsConfig) agentByKey(agentKey string) AgentModelConfig {
 	switch agentKey {
 	case "router":
-		cfg = ac.Router
+		return ac.Router
 	case "source_analyzer":
-		cfg = ac.SourceAnalyzer
+		return ac.SourceAnalyzer
 	case "business_logic":
-		cfg = ac.BusinessLogic
+		return ac.BusinessLogic
 	case "code_generator":
-		cfg = ac.CodeGenerator
+		return ac.CodeGenerator
 	case "db_migration":
-		cfg = ac.DbMigration
+		return ac.DbMigration
 	case "test_generator":
-		cfg = ac.TestGenerator
+		return ac.TestGenerator
 	case "reviewer":
-		cfg = ac.Reviewer
+		return ac.Reviewer
 	case "commander":
-		cfg = ac.Commander
+		return ac.Commander
 	case "github_connector":
-		cfg = ac.GithubConnector
+		return ac.GithubConnector
 	default:
-		cfg = ac.Router
+		return ac.Router
 	}
+}
+
+func (ac *AgentsConfig) ForAgent(agentKey string) (baseURL, apiKey, model string) {
+	cfg := ac.agentByKey(agentKey)
 	src, ok := ac.Sources[cfg.Source]
 	if !ok {
 		src = ac.Sources["aimlapi"]
 	}
 	return src.BaseURL, src.APIKey, cfg.Model
+}
+
+func (ac *AgentsConfig) ModelFor(agentKey string) (model, source string) {
+	cfg := ac.agentByKey(agentKey)
+	return cfg.Model, cfg.Source
 }
 
 func Load() (*Config, error) {
@@ -206,9 +236,11 @@ func Load() (*Config, error) {
 			RefreshExpiry: getEnvAsDuration("JWT_REFRESH_EXPIRY", 168*time.Hour),
 		},
 		Band: BandConfig{
-			Provider: getEnv("BAND_PROVIDER", "stub"),
-			BaseURL:  getEnv("BAND_BASE_URL", ""),
-			APIKey:   getEnv("BAND_API_KEY", ""),
+			Provider:       getEnv("BAND_PROVIDER", "stub"),
+			BaseURL:        getEnv("BAND_BASE_URL", "https://app.band.ai/api/v1"),
+			APIKey:         getEnv("BAND_API_KEY", ""),
+			AgentNamespace: getEnv("BAND_AGENT_NAMESPACE", "dxs16823"),
+			Agents:         loadBandAgents(),
 		},
 		Model: ModelConfig{
 			Provider:    getEnv("MODEL_PROVIDER", "featherless"),
@@ -240,6 +272,7 @@ func Load() (*Config, error) {
 			EnableRealBand:          getEnvAsBool("ENABLE_REAL_BAND", false),
 		},
 		Agents: AgentsConfig{
+			MaxConcurrency: getEnvAsInt("LLM_MAX_CONCURRENCY", 2),
 			Sources: map[string]APISourceConfig{
 				"aimlapi": {
 					BaseURL: getEnv("AIMLAPI_BASE_URL", "https://api.aimlapi.com/v1"),
@@ -317,6 +350,27 @@ func (c *Config) IsDevelopment() bool {
 
 func (c *Config) IsProduction() bool {
 	return c.Server.Env == "production"
+}
+
+// bandAgentKeys are the internal keys for all 9 Ferry agents. The env var
+// names derive from these: e.g. "source_analyzer" → BAND_SOURCE_ANALYZER_ID /
+// BAND_SOURCE_ANALYZER_KEY.
+var bandAgentKeys = []string{
+	"router", "commander", "test_generator", "github_connector",
+	"source_analyzer", "business_logic", "code_generator", "db_migration", "reviewer",
+}
+
+func loadBandAgents() map[string]BandAgentIdentity {
+	agents := make(map[string]BandAgentIdentity, len(bandAgentKeys))
+	for _, key := range bandAgentKeys {
+		envPrefix := "BAND_" + strings.ToUpper(key)
+		agents[key] = BandAgentIdentity{
+			Key:    key,
+			ID:     getEnv(envPrefix+"_ID", ""),
+			APIKey: getEnv(envPrefix+"_KEY", ""),
+		}
+	}
+	return agents
 }
 
 func getEnv(key, defaultValue string) string {

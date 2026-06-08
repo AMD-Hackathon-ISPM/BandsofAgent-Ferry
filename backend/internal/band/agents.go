@@ -1,0 +1,115 @@
+package band
+
+import (
+	"fmt"
+	"strings"
+)
+
+// FerryAgent describes one Band-hosted agent that participates in a migration
+// run. Key matches the internal agent key (config + agent_messages.agent_name);
+// Handle is the canonical Band handle WITHOUT a leading "@" (e.g.
+// "dxs16823/ferryrouter"); Name is the agent's display name on Band.
+type FerryAgent struct {
+	Key          string
+	Handle       string
+	Name         string
+	Capabilities []string
+}
+
+// Mention is "@handle" — the form used inside message content.
+func (a FerryAgent) Mention() string { return "@" + a.Handle }
+
+type ferryAgentSpec struct {
+	key          string
+	handleSuffix string
+	name         string
+	capabilities []string
+}
+
+var ferryAgentSpecs = []ferryAgentSpec{
+	{"router", "ferryrouter", "FerryRouter", []string{"planning", "taskDelegation", "workflowOrchestration"}},
+	{"source_analyzer", "ferrysourceanalyzer", "FerrySourceAnalyzer", []string{"repoAnalysis", "frameworkDetection", "architecture"}},
+	{"business_logic", "ferrybusinesslogic", "FerryBusinessLogic", []string{"businessRules", "domainLogic", "workflows"}},
+	{"code_generator", "ferrycodegenerator", "FerryCodeGenerator", []string{"codeGeneration", "translation"}},
+	{"db_migration", "ferrydbmigrator", "FerryDBMigrator", []string{"schemaAnalysis", "myisamToInnodb", "migrationPlan"}},
+	{"test_generator", "ferrytestgenerator", "FerryTestGenerator", []string{"unitTests", "integrationTests", "validation"}},
+	{"reviewer", "ferryreviewer", "FerryReviewer", []string{"review", "issueDetection", "revisionRequests"}},
+	{"commander", "ferrycommander", "FerryCommander", []string{"readinessEvaluation", "approval"}},
+	{"github_connector", "ferrygithubconnector", "FerryGithubConnector", []string{"branching", "commit", "pullRequest"}},
+}
+
+func FerryAgents(namespace string) []FerryAgent {
+	agents := make([]FerryAgent, len(ferryAgentSpecs))
+	for i, spec := range ferryAgentSpecs {
+		agents[i] = FerryAgent{
+			Key:          spec.key,
+			Handle:       fmt.Sprintf("%s/%s", namespace, spec.handleSuffix),
+			Name:         spec.name,
+			Capabilities: spec.capabilities,
+		}
+	}
+	return agents
+}
+
+func RouterHandle(namespace string) string {
+	return fmt.Sprintf("%s/ferryrouter", namespace)
+}
+
+type FerryRunContext struct {
+	CompanyID          string
+	ProjectID          string
+	MigrationRunID     string
+	RepoFullName       string
+	SourceLanguage     string
+	TargetLanguage     string
+	DBMigrationEnabled bool
+	DBFileID           string
+}
+
+func (rc FerryRunContext) RoomName() string {
+	return fmt.Sprintf("Ferry: %s (%s → %s)", rc.RepoFullName, rc.SourceLanguage, rc.TargetLanguage)
+}
+
+func BuildKickoffMessage(rc FerryRunContext, namespace string) string {
+	dbFile := rc.DBFileID
+	if dbFile == "" {
+		dbFile = "none"
+	}
+
+	var mentions []string
+	for _, a := range FerryAgents(namespace) {
+		if a.Key == "router" {
+			continue
+		}
+		mentions = append(mentions, a.Mention())
+	}
+
+	return fmt.Sprintf(`Start Ferry migration run.
+
+Repository: %s
+
+Source Language: %s
+
+Target Language: %s
+
+Database Migration Enabled: %t
+
+Database File: %s
+
+Create a migration strategy and coordinate all participating agents through Band.
+
+Required participants:
+
+%s
+
+Final objective:
+
+Generate migrated codebase, validate migration, and create a GitHub Pull Request.`,
+		rc.RepoFullName,
+		rc.SourceLanguage,
+		rc.TargetLanguage,
+		rc.DBMigrationEnabled,
+		dbFile,
+		strings.Join(mentions, "\n"),
+	)
+}

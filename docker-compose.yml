@@ -58,6 +58,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: ferry-backend:local
     container_name: ferry-backend
     env_file:
       - ./backend/.env
@@ -81,6 +82,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - ferry-network
+    restart: unless-stopped
+
+  # Band agent workers: 9 agents connect to Band over WebSocket, consume their
+  # inboxes, run their configured LLMs, and hand off down the migration pipeline.
+  # Reuses the backend image (which builds both ./cmd/api and ./cmd/agents).
+  agents:
+    image: ferry-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ferry-agents
+    command: ["./ferry-agents"]
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - backend
     networks:
       - ferry-network
     restart: unless-stopped

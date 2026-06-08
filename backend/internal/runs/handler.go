@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ferry/backend/internal/auth"
+	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/db"
 	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/google/uuid"
@@ -23,10 +24,11 @@ type Handler struct {
 	q           *db.Queries
 	rdb         *redis.Client
 	authService *auth.Service
+	band        *band.Service
 }
 
-func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service) *Handler {
-	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService}
+func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service) *Handler {
+	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc}
 }
 
 // --- View models (match frontend types.ts) ---
@@ -430,13 +432,46 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s := db.MigrationStatusPlanning
-	if _, err := h.q.StartMigrationRun(r.Context(), companyID, runID, &s); err != nil {
+	project, err := h.q.GetProject(r.Context(), companyID, existing.ProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project")
+		return
+	}
+
+	// Kick off the Band collaboration room (create chat, add agents, post kickoff).
+	rc := band.FerryRunContext{
+		CompanyID:          companyID.String(),
+		ProjectID:          existing.ProjectID.String(),
+		MigrationRunID:     runID.String(),
+		RepoFullName:       strPtr(project.GithubRepoUrl),
+		SourceLanguage:     string(project.SourceLanguage),
+		TargetLanguage:     string(project.TargetLanguage),
+		DBMigrationEnabled: project.EnableDbMigration != nil && *project.EnableDbMigration,
+	}
+	bandChatID, err := h.band.StartFerryBandRoom(r.Context(), rc)
+	if err != nil {
+		failed := db.MigrationStatusFailed
+		msg := "failed to start Band room: " + err.Error()
+		_, _ = h.q.UpdateMigrationRunStatus(r.Context(), companyID, runID, &failed, &msg)
+		writeError(w, http.StatusBadGateway, "failed to start Band collaboration room")
+		return
+	}
+
+	// Persist the band room id + flip the run to planning/started.
+	if _, err := h.pool.Exec(r.Context(),
+		`UPDATE migration_runs SET band_room_id = $1, status = 'planning', started_at = NOW()
+		 WHERE company_id = $2 AND id = $3`,
+		bandChatID, companyID, runID,
+	); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start run")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "planning"})
+	desc := "Ferry migration room for " + strPtr(project.GithubRepoUrl)
+	roomName := rc.RoomName()
+	_, _ = h.q.CreateBandRoom(r.Context(), companyID, runID, bandChatID, roomName, &desc, []byte("{}"))
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "planning", "bandChatId": bandChatID})
 }
 
 func (h *Handler) CancelRun(w http.ResponseWriter, r *http.Request) {

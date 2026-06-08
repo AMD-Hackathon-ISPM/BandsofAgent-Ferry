@@ -14,8 +14,11 @@ import (
 	"time"
 
 	"github.com/ferry/backend/internal/auth"
+	"github.com/ferry/backend/internal/band"
+	"github.com/ferry/backend/internal/bandmirror"
 	"github.com/ferry/backend/internal/config"
 	"github.com/ferry/backend/internal/db"
+	ferrypkg "github.com/ferry/backend/internal/ferry"
 	ghpkg "github.com/ferry/backend/internal/github"
 	"github.com/ferry/backend/internal/http/middleware"
 	migratepkg "github.com/ferry/backend/internal/migrate"
@@ -66,7 +69,20 @@ func main() {
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
 	ghAPIHandler := ghpkg.NewHandler(rdb, cfg.GitHub.PAT)
-	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService)
+
+	bandService, err := band.NewService(&cfg.Band)
+	if err != nil {
+		log.Fatalf("failed to init band service: %v", err)
+	}
+
+	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService)
+	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents)
+
+	// Mirror Band chat transcripts into agent_messages + Redis so the run
+	// timeline + SSE surface the agent collaboration in the frontend.
+	if mirror := bandmirror.New(pool, rdb, cfg); mirror != nil {
+		go mirror.Run(context.Background())
+	}
 
 	mux := http.NewServeMux()
 
@@ -94,6 +110,9 @@ func main() {
 	mux.Handle("POST /api/runs/{id}/db-plan/approve", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.ApproveDbPlan)))
 	// SSE: auth handled inside handler (EventSource can't set headers, token via query param)
 	mux.HandleFunc("GET /api/runs/{id}/stream", runsHandler.StreamRun)
+
+	// Ferry: create migration run + kick off Band collaboration room
+	mux.Handle("POST /api/ferry/runs", authMiddleware.Authenticate(http.HandlerFunc(ferryHandler.CreateRun)))
 
 	handler := corsMiddleware(cfg)(mux)
 
