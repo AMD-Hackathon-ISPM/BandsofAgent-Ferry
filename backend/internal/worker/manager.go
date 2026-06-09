@@ -66,7 +66,7 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		client := band.NewAgentClient(baseURL, ident.APIKey)
 		llm := NewLLM(llmBase, llmKey, llmModel, limiter)
 
-		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, source, execEnabled, cfg.Sandbox.RunnerURL, roster, rdb, keyByID))
+		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
 	}
 
 	if len(workers) == 0 {

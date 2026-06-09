@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,15 +41,20 @@ type LLM struct {
 	apiKey  string
 	model   string
 	http    *http.Client
+	idle    time.Duration
 	limiter *Limiter
 }
 
 func NewLLM(baseURL, apiKey, model string, limiter *Limiter) *LLM {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 45 * time.Second
+
 	return &LLM{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{Timeout: 240 * time.Second},
+		http:    &http.Client{Transport: transport},
+		idle:    90 * time.Second,
 		limiter: limiter,
 	}
 }
@@ -58,6 +64,42 @@ func (l *LLM) Configured() bool { return l.apiKey != "" }
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type chatCompletionRequest struct {
+	Model       string        `json:"model"`
+	Messages    []chatMessage `json:"messages"`
+	Temperature float64       `json:"temperature"`
+	Stream      bool          `json:"stream"`
+}
+
+type chatCompletionResponse struct {
+	Choices []struct {
+		Message chatMessage `json:"message"`
+	} `json:"choices"`
+}
+
+type chatCompletionChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+		Message chatMessage `json:"message"`
+		Text    string      `json:"text"`
+	} `json:"choices"`
+}
+
+type activityReadCloser struct {
+	io.ReadCloser
+	notify func()
+}
+
+func (r *activityReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 && r.notify != nil {
+		r.notify()
+	}
+	return n, err
 }
 
 const maxLLMRetries = 5
@@ -70,13 +112,14 @@ func (l *LLM) Complete(ctx context.Context, system, user string) (string, error)
 		defer l.limiter.release()
 	}
 
-	reqBody := map[string]interface{}{
-		"model": l.model,
-		"messages": []chatMessage{
+	reqBody := chatCompletionRequest{
+		Model: l.model,
+		Messages: []chatMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
-		"temperature": 0.3,
+		Temperature: 0.3,
+		Stream:      true,
 	}
 	raw, err := json.Marshal(reqBody)
 	if err != nil {
@@ -104,11 +147,15 @@ func (l *LLM) Complete(ctx context.Context, system, user string) (string, error)
 }
 
 func (l *LLM) do(ctx context.Context, raw []byte) (text string, retryAfter time.Duration, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.baseURL+"/chat/completions", bytes.NewReader(raw))
+	reqCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, l.baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return "", 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+l.apiKey)
+	req.Header.Set("Accept", "text/event-stream, application/json")
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := l.http.Do(req)
@@ -125,18 +172,23 @@ func (l *LLM) do(ctx context.Context, raw []byte) (text string, retryAfter time.
 		return "", 0, fmt.Errorf("chat/completions: status %d: %s", resp.StatusCode, string(snippet))
 	}
 
-	var out struct {
-		Choices []struct {
-			Message chatMessage `json:"message"`
-		} `json:"choices"`
+	reader := &activityReadCloser{
+		ReadCloser: resp.Body,
+		notify: func() {
+			// Keep the request alive while bytes continue arriving.
+		},
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", 0, fmt.Errorf("decode: %w", err)
+
+	parse := readChatCompletionJSON
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		parse = readChatCompletionStream
 	}
-	if len(out.Choices) == 0 {
-		return "", 0, fmt.Errorf("chat/completions: no choices returned")
+
+	text, err = l.readWithIdleWatch(reqCtx, cancel, reader, parse)
+	if err != nil {
+		return "", 0, err
 	}
-	return strings.TrimSpace(out.Choices[0].Message.Content), 0, nil
+	return text, 0, nil
 }
 
 func backoffFrom(retryAfter string) time.Duration {
@@ -146,4 +198,138 @@ func backoffFrom(retryAfter string) time.Duration {
 		}
 	}
 	return 3 * time.Second
+}
+
+func (l *LLM) readWithIdleWatch(ctx context.Context, cancel context.CancelFunc, body *activityReadCloser, parse func(io.Reader) (string, error)) (string, error) {
+	activity := make(chan struct{}, 1)
+	body.notify = func() {
+		select {
+		case activity <- struct{}{}:
+		default:
+		}
+	}
+
+	type result struct {
+		text string
+		err  error
+	}
+
+	done := make(chan result, 1)
+	go func() {
+		text, err := parse(body)
+		done <- result{text: text, err: err}
+	}()
+
+	timer := time.NewTimer(l.idle)
+	defer timer.Stop()
+
+	for {
+		select {
+		case res := <-done:
+			return res.text, res.err
+		case <-activity:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(l.idle)
+		case <-timer.C:
+			cancel()
+			_ = body.Close()
+			return "", fmt.Errorf("chat/completions: idle timeout after %s with no response body progress", l.idle)
+		case <-ctx.Done():
+			cancel()
+			_ = body.Close()
+			return "", ctx.Err()
+		}
+	}
+}
+
+func readChatCompletionJSON(r io.Reader) (string, error) {
+	var out chatCompletionResponse
+	if err := json.NewDecoder(r).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode: %w", err)
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("chat/completions: no choices returned")
+	}
+	return strings.TrimSpace(out.Choices[0].Message.Content), nil
+}
+
+func readChatCompletionStream(r io.Reader) (string, error) {
+	reader := bufio.NewReader(r)
+	var text strings.Builder
+	var event strings.Builder
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("stream read: %w", err)
+		}
+
+		if line != "" {
+			trimmed := strings.TrimRight(line, "\r\n")
+			if trimmed == "" {
+				done, eventErr := appendStreamEvent(&text, event.String())
+				if eventErr != nil {
+					return "", eventErr
+				}
+				event.Reset()
+				if done {
+					return strings.TrimSpace(text.String()), nil
+				}
+			} else if strings.HasPrefix(trimmed, "data:") {
+				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+				if payload != "" {
+					if event.Len() > 0 {
+						event.WriteByte('\n')
+					}
+					event.WriteString(payload)
+				}
+			}
+		}
+
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+
+	if event.Len() > 0 {
+		done, err := appendStreamEvent(&text, event.String())
+		if err != nil {
+			return "", err
+		}
+		if done {
+			return strings.TrimSpace(text.String()), nil
+		}
+	}
+
+	return strings.TrimSpace(text.String()), nil
+}
+
+func appendStreamEvent(dst *strings.Builder, payload string) (bool, error) {
+	if payload == "" {
+		return false, nil
+	}
+	if payload == "[DONE]" {
+		return true, nil
+	}
+
+	var chunk chatCompletionChunk
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		return false, fmt.Errorf("stream decode: %w", err)
+	}
+	for _, choice := range chunk.Choices {
+		switch {
+		case choice.Delta.Content != "":
+			dst.WriteString(choice.Delta.Content)
+		case choice.Message.Content != "":
+			dst.WriteString(choice.Message.Content)
+		case choice.Text != "":
+			dst.WriteString(choice.Text)
+		}
+	}
+	return false, nil
 }

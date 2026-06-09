@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ferry/backend/internal/band"
 	"github.com/redis/go-redis/v9"
@@ -27,6 +29,7 @@ type Worker struct {
 	source      *SourceProvider
 	execEnabled bool
 	runnerURL   string
+	bandBaseURL string
 	roster      map[string]AgentInfo
 	rdb         *redis.Client
 	keyByID     map[string]string
@@ -36,7 +39,7 @@ type Worker struct {
 	handled map[string]bool
 }
 
-func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, source *SourceProvider, execEnabled bool, runnerURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
+func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
 	return &Worker{
 		info:        info,
 		role:        role,
@@ -45,6 +48,7 @@ func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LL
 		source:      source,
 		execEnabled: execEnabled,
 		runnerURL:   runnerURL,
+		bandBaseURL: bandBaseURL,
 		roster:      roster,
 		rdb:         rdb,
 		keyByID:     keyByID,
@@ -65,7 +69,7 @@ func (w *Worker) claim(msgID string) bool {
 	return true
 }
 
-// markJoined returns false if this chat's channel was already joined.
+// markJoined returns false if this chat's channel was already known.
 func (w *Worker) markJoined(chatID string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -76,6 +80,22 @@ func (w *Worker) markJoined(chatID string) bool {
 	return true
 }
 
+func (w *Worker) joinedRooms() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	rooms := make([]string, 0, len(w.joined))
+	for chatID := range w.joined {
+		rooms = append(rooms, chatID)
+	}
+	return rooms
+}
+
+const (
+	reconnectBaseDelay = time.Second
+	reconnectMaxDelay  = 30 * time.Second
+)
+
 func (w *Worker) Run(ctx context.Context) error {
 	me, err := w.client.Me(ctx)
 	if err != nil {
@@ -83,7 +103,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	w.info.ID = me.ID
 	if !w.llm.Configured() {
-		log.Printf("[%s] WARNING: no LLM API key configured — messages will fail until the agent's source key is set", w.info.Key)
+		log.Printf("[%s] WARNING: no LLM API key configured - messages will fail until the agent's source key is set", w.info.Key)
 	}
 	log.Printf("[%s] online as %s (%s)", w.info.Key, me.Handle, me.ID)
 
@@ -91,17 +111,61 @@ func (w *Worker) Run(ctx context.Context) error {
 	// chats can contain messages stuck unprocessed (e.g. a handoff target that
 	// isn't a participant), and re-draining them every restart re-runs dead
 	// pipelines and starves new runs. New runs are delivered via agent_rooms
-	// (room_added → join + drain) and live WebSocket message_created events.
-	px := NewPhoenixClient(w.client.APIKey())
-	if err := px.Connect(ctx); err != nil {
-		return fmt.Errorf("[%s] %w", w.info.Key, err)
-	}
-	if err := px.Join("agent_rooms:" + w.info.ID); err != nil {
-		log.Printf("[%s] join agent_rooms failed: %v", w.info.Key, err)
-	}
+	// (room_added -> join + drain) and live WebSocket message_created events.
+	attempt := 0
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
-	go w.dispatch(ctx, px)
-	return px.Run(ctx)
+		connCtx, cancel := context.WithCancel(ctx)
+		px := NewPhoenixClient(w.bandBaseURL, w.client.APIKey())
+		if err := px.Connect(connCtx); err != nil {
+			cancel()
+			if waitErr := w.waitReconnect(ctx, attempt, err); waitErr != nil {
+				return waitErr
+			}
+			attempt++
+			continue
+		}
+
+		if err := px.Join("agent_rooms:" + w.info.ID); err != nil {
+			cancel()
+			if waitErr := w.waitReconnect(ctx, attempt, fmt.Errorf("join agent_rooms: %w", err)); waitErr != nil {
+				return waitErr
+			}
+			attempt++
+			continue
+		}
+
+		attempt = 0
+		for _, chatID := range w.joinedRooms() {
+			if err := px.Join("chat_room:" + chatID); err != nil {
+				log.Printf("[%s] rejoin chat_room %s failed: %v", w.info.Key, chatID, err)
+				continue
+			}
+			go w.drain(connCtx, chatID)
+		}
+
+		var dispatchWG sync.WaitGroup
+		dispatchWG.Add(1)
+		go func() {
+			defer dispatchWG.Done()
+			w.dispatch(connCtx, px)
+		}()
+
+		err := px.Run(connCtx)
+		cancel()
+		dispatchWG.Wait()
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if waitErr := w.waitReconnect(ctx, attempt, err); waitErr != nil {
+			return waitErr
+		}
+		attempt++
+	}
 }
 
 func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
@@ -120,13 +184,52 @@ func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
 				w.handle(ctx, roomID, &msg)
 			case "room_added":
 				if id := extractRoomID(ev.Payload); id != "" && w.markJoined(id) {
-					if err := px.Join("chat_room:" + id); err == nil {
-						w.drain(ctx, id)
+					if err := px.Join("chat_room:" + id); err != nil {
+						log.Printf("[%s] join chat_room %s failed: %v", w.info.Key, id, err)
+					} else {
+						go w.drain(ctx, id)
 					}
 				}
 			}
 		}
 	}
+}
+
+func (w *Worker) waitReconnect(ctx context.Context, attempt int, err error) error {
+	delay := reconnectDelay(attempt)
+	hinted := retryAfterHint(err)
+	if hinted > delay {
+		delay = hinted
+	}
+	if hinted > 0 && !errors.Is(err, context.Canceled) {
+		log.Printf("[%s] server requested reconnect wait of %s", w.info.Key, hinted)
+	}
+	log.Printf("[%s] websocket connection lost: %v; reconnecting in %s", w.info.Key, err, delay)
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func reconnectDelay(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+
+	delay := reconnectBaseDelay
+	for i := 0; i < attempt && delay < reconnectMaxDelay; i++ {
+		delay *= 2
+		if delay > reconnectMaxDelay {
+			delay = reconnectMaxDelay
+		}
+	}
+	return delay
 }
 
 func (w *Worker) drain(ctx context.Context, chatID string) {
@@ -180,7 +283,7 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	if w.role.createsPR {
 		if url, prErr := w.createPR(ctx, runCtx); prErr != nil {
 			log.Printf("[%s] PR creation failed: %v", w.info.Key, prErr)
-			execReport = "PULL REQUEST: failed — " + prErr.Error()
+			execReport = "PULL REQUEST: failed - " + prErr.Error()
 			artifact = band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "failed", Body: prErr.Error()})
 		} else {
 			log.Printf("[%s] opened PR: %s", w.info.Key, url)
@@ -217,14 +320,14 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		if artifact != "" {
 			content += "\n\n" + artifact
 		}
-		content += fmt.Sprintf("\n\n@%s — please continue.\n\n%s", next.Handle, band.MarshalCtx(runCtx))
+		content += fmt.Sprintf("\n\n@%s - please continue.\n\n%s", next.Handle, band.MarshalCtx(runCtx))
 		mentions := []band.Mention{{ID: next.ID, Name: next.Name, Handle: next.Handle}}
 		if _, err := w.client.SendMessage(ctx, chatID, content, mentions); err != nil {
 			log.Printf("[%s] handoff to %s failed: %v", w.info.Key, next.Handle, err)
 			_ = w.client.MarkFailed(ctx, chatID, msg.ID, err.Error())
 			return
 		}
-		log.Printf("[%s] processed → handed off to %s", w.info.Key, next.Key)
+		log.Printf("[%s] processed -> handed off to %s", w.info.Key, next.Key)
 	} else {
 		log.Printf("[%s] processed (terminal)", w.info.Key)
 	}
