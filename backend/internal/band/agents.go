@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// FerryAgent describes one Band-hosted agent that participates in a migration
-// run. Key matches the internal agent key (config + agent_messages.agent_name);
-// Handle is the canonical Band handle WITHOUT a leading "@" (e.g.
-// "dxs16823/ferryrouter"); Name is the agent's display name on Band.
 type FerryAgent struct {
 	Key          string
 	Handle       string
@@ -16,7 +12,6 @@ type FerryAgent struct {
 	Capabilities []string
 }
 
-// Mention is "@handle" — the form used inside message content.
 func (a FerryAgent) Mention() string { return "@" + a.Handle }
 
 type ferryAgentSpec struct {
@@ -60,10 +55,12 @@ type FerryRunContext struct {
 	ProjectID          string
 	MigrationRunID     string
 	RepoFullName       string
+	Branch             string
 	SourceLanguage     string
 	TargetLanguage     string
 	DBMigrationEnabled bool
 	DBFileID           string
+	User               string
 }
 
 func (rc FerryRunContext) RoomName() string {
@@ -104,12 +101,15 @@ Required participants:
 
 Final objective:
 
-Generate migrated codebase, validate migration, and create a GitHub Pull Request.`,
+Generate migrated codebase, validate migration, and create a GitHub Pull Request.
+
+%s`,
 		rc.RepoFullName,
 		rc.SourceLanguage,
 		rc.TargetLanguage,
 		rc.DBMigrationEnabled,
 		dbFile,
 		strings.Join(mentions, "\n"),
+		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User}),
 	)
 }

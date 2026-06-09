@@ -8,20 +8,16 @@ import (
 
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/config"
+	"github.com/redis/go-redis/v9"
 )
 
-// Manager owns all agent workers for one process.
 type Manager struct {
 	workers []*Worker
 }
 
-// NewManager builds a Worker for every agent that has a Band key configured.
-// Each worker is bound to its own Band Agent API key and its own LLM
-// (model + source) from the per-agent configuration.
 func NewManager(cfg *config.Config) (*Manager, error) {
 	baseURL := cfg.Band.BaseURL + "/agent"
 
-	// Build the shared roster (key → id/handle/name) for handoff @mentions.
 	roster := make(map[string]AgentInfo)
 	for _, a := range band.FerryAgents(cfg.Band.AgentNamespace) {
 		roster[a.Key] = AgentInfo{
@@ -32,10 +28,20 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		}
 	}
 
-	// Shared limiter so all agents together stay within the provider's
-	// concurrency cap (e.g. Featherless reasoning models allow 2 at a time).
 	limiter := NewLimiter(cfg.Agents.MaxConcurrency)
 	log.Printf("LLM concurrency limit: %d", cfg.Agents.MaxConcurrency)
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Host + ":" + cfg.Redis.Port,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	source := NewSourceProvider(cfg.GitHub.PAT, rdb)
+
+	execEnabled := cfg.Features.EnableCodeExecution
+	if execEnabled {
+		log.Printf("sandbox code execution: ENABLED (runner=%q)", cfg.Sandbox.RunnerURL)
+	}
 
 	var workers []*Worker
 	for _, a := range band.FerryAgents(cfg.Band.AgentNamespace) {
@@ -53,7 +59,7 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		client := band.NewAgentClient(baseURL, ident.APIKey)
 		llm := NewLLM(llmBase, llmKey, llmModel, limiter)
 
-		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, roster))
+		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, source, execEnabled, cfg.Sandbox.RunnerURL, roster))
 	}
 
 	if len(workers) == 0 {
@@ -62,8 +68,6 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 	return &Manager{workers: workers}, nil
 }
 
-// Run starts every worker and blocks until ctx is cancelled. A worker that
-// errors is logged and restarted is left to the caller (process supervisor).
 func (m *Manager) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, w := range m.workers {

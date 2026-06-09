@@ -45,6 +45,8 @@ func (h *GitHubHandler) HandleBegin(w http.ResponseWriter, r *http.Request) {
 		"client_id":    {h.cfg.ClientID},
 		"redirect_uri": {h.cfg.RedirectURI},
 		"state":        {state},
+
+		"scope": {"read:user user:email public_repo"},
 	}
 
 	http.Redirect(w, r, "https://github.com/login/oauth/authorize?"+params.Encode(), http.StatusTemporaryRedirect)
@@ -161,7 +163,6 @@ func (h *GitHubHandler) getGitHubUser(ctx context.Context, token string) (*GitHu
 		return nil, err
 	}
 
-	// If the primary email is private, fetch from /user/emails
 	if user.Email == "" {
 		user.Email, _ = h.getGitHubPrimaryEmail(ctx, token)
 	}

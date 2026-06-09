@@ -9,8 +9,8 @@ import (
 )
 
 type Service struct {
-	adapter Adapter      // legacy in-memory adapter (used by dev/stub paths)
-	client  *AgentClient // real Band Agent API client (acts as Router); nil in stub mode
+	adapter Adapter
+	client  *AgentClient
 	config  *config.BandConfig
 }
 
@@ -29,18 +29,17 @@ func NewService(cfg *config.BandConfig) (*Service, error) {
 		if routerKey == "" {
 			return nil, fmt.Errorf("BAND_ROUTER_KEY (Router agent band_a_ key) is required when BAND_PROVIDER=%s", cfg.Provider)
 		}
-		// The backend orchestrates by acting as the Router agent.
+
 		s.client = NewAgentClient(cfg.BaseURL+"/agent", routerKey)
 	case "stub":
-		// in-memory only
+
 	default:
-		// default to stub for safety
+
 	}
 
 	return s, nil
 }
 
-// Namespace returns the configured Band agent namespace (e.g. "dxs16823").
 func (s *Service) Namespace() string {
 	return s.config.AgentNamespace
 }
@@ -121,26 +120,10 @@ func (s *Service) GetDecisions(ctx context.Context, roomID string) ([]Decision, 
 	return s.adapter.GetDecisions(ctx, roomID)
 }
 
-// --- Ferry high-level orchestration ----------------------------------------
-// These are the only Band operations the backend performs for a migration run:
-// create the chat, add the agent participants, and post ONE kickoff message
-// addressed to the Router. After that, all collaboration happens inside Band
-// between the agents themselves — the backend does NOT orchestrate execution.
-
-// StartFerryBandRoom performs the full kickoff sequence for a migration run.
-// The backend acts as the Router agent and:
-//  1. creates the chat (Router is auto-added as a participant)
-//  2. adds the other 8 agents as participants (by Band agent id)
-//  3. posts a single kickoff message @mentioning those 8 agents
-//
-// After this, all collaboration happens inside Band between the agents
-// themselves. Returns the created Band chat id. In stub mode it returns a
-// simulated id so local dev works without hitting Band.
 func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (string, error) {
 	namespace := s.config.AgentNamespace
 	roster := s.roster()
 
-	// Stub mode: simulate via the in-memory adapter so dev flows still work.
 	if s.client == nil {
 		room, err := s.adapter.CreateRoom(ctx, CreateRoomRequest{
 			CompanyID:      rc.CompanyID,
@@ -157,13 +140,11 @@ func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (s
 		return room.ID, nil
 	}
 
-	// Real Band Agent API (acting as the Router).
 	chatID, err := s.client.CreateChat(ctx, "")
 	if err != nil {
 		return "", fmt.Errorf("create band chat: %w", err)
 	}
 
-	// Add and @mention the 8 non-Router agents (the Router is the author).
 	mentions := make([]Mention, 0, len(roster))
 	for _, a := range roster {
 		if a.Key == "router" {
@@ -185,13 +166,11 @@ func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (s
 	return chatID, nil
 }
 
-// rosterAgent is a FerryAgent enriched with its Band id from config.
 type rosterAgent struct {
 	FerryAgent
 	ID string
 }
 
-// roster returns all 9 agents with handles (from namespace) and ids (from config).
 func (s *Service) roster() []rosterAgent {
 	agents := FerryAgents(s.config.AgentNamespace)
 	out := make([]rosterAgent, len(agents))

@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-// Limiter is a counting semaphore bounding concurrent LLM requests across all
-// agents. Providers like Featherless cap concurrency per plan (e.g. the
-// reasoning model allows only 2 concurrent requests), so without this the
-// agents would trip 429 "concurrency limit exceeded".
 type Limiter struct {
 	ch chan struct{}
 }
@@ -38,9 +34,6 @@ func (l *Limiter) acquire(ctx context.Context) error {
 
 func (l *Limiter) release() { <-l.ch }
 
-// LLM is a minimal OpenAI-compatible chat-completions client. Each agent gets
-// its own LLM bound to its configured model + source (aimlapi / featherless),
-// per the AGENT_<NAME>_MODEL / _SOURCE configuration. All LLMs share a Limiter.
 type LLM struct {
 	baseURL string
 	apiKey  string
@@ -59,7 +52,6 @@ func NewLLM(baseURL, apiKey, model string, limiter *Limiter) *LLM {
 	}
 }
 
-// Configured reports whether this LLM has an API key set.
 func (l *LLM) Configured() bool { return l.apiKey != "" }
 
 type chatMessage struct {
@@ -69,8 +61,6 @@ type chatMessage struct {
 
 const maxLLMRetries = 5
 
-// Complete runs a single chat completion and returns the assistant text. It
-// bounds concurrency via the shared Limiter and retries on 429 with backoff.
 func (l *LLM) Complete(ctx context.Context, system, user string) (string, error) {
 	if l.limiter != nil {
 		if err := l.limiter.acquire(ctx); err != nil {
@@ -100,9 +90,9 @@ func (l *LLM) Complete(ctx context.Context, system, user string) (string, error)
 		}
 		lastErr = err
 		if retryAfter <= 0 {
-			return "", err // non-retryable
+			return "", err
 		}
-		// Wait out the rate limit (respecting ctx).
+
 		select {
 		case <-time.After(retryAfter):
 		case <-ctx.Done():
@@ -112,8 +102,6 @@ func (l *LLM) Complete(ctx context.Context, system, user string) (string, error)
 	return "", fmt.Errorf("exhausted retries: %w", lastErr)
 }
 
-// do performs one request. On HTTP 429 it returns a positive retryAfter so the
-// caller backs off and retries; other errors return retryAfter == 0.
 func (l *LLM) do(ctx context.Context, raw []byte) (text string, retryAfter time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
@@ -150,8 +138,6 @@ func (l *LLM) do(ctx context.Context, raw []byte) (text string, retryAfter time.
 	return strings.TrimSpace(out.Choices[0].Message.Content), 0, nil
 }
 
-// backoffFrom returns how long to wait before retrying a 429: the Retry-After
-// header if present, otherwise a fixed 3s pause.
 func backoffFrom(retryAfter string) time.Duration {
 	if retryAfter != "" {
 		if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs > 0 {

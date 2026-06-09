@@ -11,16 +11,20 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ferry ./cmd/api && \
-    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ferry-agents ./cmd/agents
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ferry-agents ./cmd/agents && \
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ferry-runner ./cmd/runner
 
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+# docker-cli lets the agents launch ephemeral sandbox containers via the host
+# Docker socket (mounted in docker-compose) for code execution.
+RUN apk --no-cache add ca-certificates docker-cli
 
 WORKDIR /root/
 
 COPY --from=builder /app/ferry .
 COPY --from=builder /app/ferry-agents .
+COPY --from=builder /app/ferry-runner .
 
 COPY --from=builder /app/migrations ./migrations
 

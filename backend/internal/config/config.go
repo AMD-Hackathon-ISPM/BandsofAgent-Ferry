@@ -21,6 +21,11 @@ type Config struct {
 	Logging  LoggingConfig
 	CORS     CORSConfig
 	Features FeatureFlags
+	Sandbox  SandboxConfig
+}
+
+type SandboxConfig struct {
+	RunnerURL string
 }
 
 type ServerConfig struct {
@@ -70,21 +75,17 @@ type BandConfig struct {
 	Provider       string
 	BaseURL        string
 	APIKey         string
-	AgentNamespace string // e.g. "dxs16823" — used to build @namespace/handle agent handles
-	// Agents holds each agent's Band identity (id + per-agent X-API-Key),
-	// keyed by internal agent key (router, source_analyzer, ...).
+	AgentNamespace string
+
 	Agents map[string]BandAgentIdentity
 }
 
-// BandAgentIdentity is one agent's Band credentials. Band has NO central key —
-// every agent authenticates with its own X-API-Key.
 type BandAgentIdentity struct {
-	Key    string // internal key (router, commander, ...)
-	ID     string // Band agent UUID (used in @mentions and participant adds)
-	APIKey string // Band X-API-Key for this agent
+	Key    string
+	ID     string
+	APIKey string
 }
 
-// Agent returns the Band identity for an internal agent key (zero value if unset).
 func (b *BandConfig) Agent(key string) BandAgentIdentity {
 	return b.Agents[key]
 }
@@ -121,27 +122,22 @@ type FeatureFlags struct {
 	EnableDBMigration       bool
 	EnableGitHubIntegration bool
 	EnableRealBand          bool
+	EnableCodeExecution     bool
 }
 
-// APISourceConfig holds credentials for one OpenAI-compatible LLM gateway.
 type APISourceConfig struct {
 	BaseURL string
 	APIKey  string
 }
 
-// AgentModelConfig pins a specific model and API source for one agent.
 type AgentModelConfig struct {
 	Model  string
-	Source string // "aimlapi" or "featherless"
+	Source string
 }
 
-// AgentsConfig holds the two API sources and per-agent model assignments.
 type AgentsConfig struct {
-	Sources map[string]APISourceConfig // keyed by source name
+	Sources map[string]APISourceConfig
 
-	// MaxConcurrency bounds simultaneous LLM requests across all agents.
-	// Providers cap concurrency per plan (e.g. Featherless reasoning models
-	// allow only 2 concurrent), so keep this at or below the tightest limit.
 	MaxConcurrency int
 
 	Router          AgentModelConfig
@@ -155,7 +151,6 @@ type AgentsConfig struct {
 	GithubConnector AgentModelConfig
 }
 
-// agentByKey resolves the per-agent model config for an internal agent key.
 func (ac *AgentsConfig) agentByKey(agentKey string) AgentModelConfig {
 	switch agentKey {
 	case "router":
@@ -270,6 +265,10 @@ func Load() (*Config, error) {
 			EnableDBMigration:       getEnvAsBool("ENABLE_DB_MIGRATION", true),
 			EnableGitHubIntegration: getEnvAsBool("ENABLE_GITHUB_INTEGRATION", true),
 			EnableRealBand:          getEnvAsBool("ENABLE_REAL_BAND", false),
+			EnableCodeExecution:     getEnvAsBool("ENABLE_CODE_EXECUTION", false),
+		},
+		Sandbox: SandboxConfig{
+			RunnerURL: getEnv("RUNNER_URL", ""),
 		},
 		Agents: AgentsConfig{
 			MaxConcurrency: getEnvAsInt("LLM_MAX_CONCURRENCY", 2),
@@ -283,7 +282,7 @@ func Load() (*Config, error) {
 					APIKey:  getEnv("FEATHERLESS_KEY", ""),
 				},
 			},
-			// --- non-volatile agents (cheap model, aimlapi) ---
+
 			Router: AgentModelConfig{
 				Model:  getEnv("AGENT_ROUTER_MODEL", "deepseek/deepseek-chat-v3.1"),
 				Source: getEnv("AGENT_ROUTER_SOURCE", "aimlapi"),
@@ -300,7 +299,7 @@ func Load() (*Config, error) {
 				Model:  getEnv("AGENT_GITHUB_CONNECTOR_MODEL", "deepseek/deepseek-chat-v3.1"),
 				Source: getEnv("AGENT_GITHUB_CONNECTOR_SOURCE", "aimlapi"),
 			},
-			// --- pivotal agents (reasoning model, featherless) ---
+
 			SourceAnalyzer: AgentModelConfig{
 				Model:  getEnv("AGENT_SOURCE_ANALYZER_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
 				Source: getEnv("AGENT_SOURCE_ANALYZER_SOURCE", "featherless"),
@@ -352,9 +351,6 @@ func (c *Config) IsProduction() bool {
 	return c.Server.Env == "production"
 }
 
-// bandAgentKeys are the internal keys for all 9 Ferry agents. The env var
-// names derive from these: e.g. "source_analyzer" → BAND_SOURCE_ANALYZER_ID /
-// BAND_SOURCE_ANALYZER_KEY.
 var bandAgentKeys = []string{
 	"router", "commander", "test_generator", "github_connector",
 	"source_analyzer", "business_logic", "code_generator", "db_migration", "reviewer",

@@ -12,19 +12,16 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// PhoenixEvent is a decoded inbound channel event.
 type PhoenixEvent struct {
 	Topic   string
 	Event   string
 	Payload json.RawMessage
 }
 
-// PhoenixClient is a minimal Phoenix Channels (vsn 2.0.0) client over a single
-// WebSocket. Frames are arrays: [join_ref, ref, topic, event, payload].
 type PhoenixClient struct {
 	apiKey  string
 	conn    *websocket.Conn
-	mu      sync.Mutex // guards writes + ref counter
+	mu      sync.Mutex
 	ref     int
 	events  chan PhoenixEvent
 	joinRef string
@@ -38,10 +35,8 @@ func NewPhoenixClient(apiKey string) *PhoenixClient {
 	}
 }
 
-// Events returns the channel of inbound events (message_created, room_added, …).
 func (p *PhoenixClient) Events() <-chan PhoenixEvent { return p.events }
 
-// Connect dials the Band WebSocket with the agent api_key.
 func (p *PhoenixClient) Connect(ctx context.Context) error {
 	u := url.URL{
 		Scheme:   "wss",
@@ -62,7 +57,6 @@ func (p *PhoenixClient) nextRef() string {
 	return fmt.Sprintf("%d", p.ref)
 }
 
-// send writes a Phoenix frame [join_ref, ref, topic, event, payload].
 func (p *PhoenixClient) send(joinRef interface{}, ref, topic, event string, payload interface{}) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -73,17 +67,13 @@ func (p *PhoenixClient) send(joinRef interface{}, ref, topic, event string, payl
 	return p.conn.WriteJSON(frame)
 }
 
-// Join joins a channel topic (e.g. "chat_room:{id}" or "agent_rooms:{id}").
 func (p *PhoenixClient) Join(topic string) error {
 	return p.send(p.joinRef, p.nextRef(), topic, "phx_join", map[string]interface{}{})
 }
 
-// Run starts the heartbeat + read loops, blocking until ctx is done or the
-// connection drops. Decoded events are pushed to Events().
 func (p *PhoenixClient) Run(ctx context.Context) error {
 	defer p.conn.Close()
 
-	// Heartbeat every 30s (server closes after 45s of silence).
 	hbCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -101,7 +91,6 @@ func (p *PhoenixClient) Run(ctx context.Context) error {
 		}
 	}()
 
-	// Close the connection when ctx is cancelled so ReadMessage unblocks.
 	go func() {
 		<-ctx.Done()
 		_ = p.conn.Close()
@@ -118,7 +107,7 @@ func (p *PhoenixClient) Run(ctx context.Context) error {
 
 		var frame []json.RawMessage
 		if err := json.Unmarshal(data, &frame); err != nil || len(frame) != 5 {
-			continue // ignore malformed frames
+			continue
 		}
 
 		var topic, event string
@@ -127,7 +116,7 @@ func (p *PhoenixClient) Run(ctx context.Context) error {
 
 		switch event {
 		case "phx_reply", "phx_close", "phx_error":
-			// join acks / lifecycle — log reply errors, otherwise ignore
+
 			if event == "phx_error" {
 				log.Printf("phoenix: error on topic %s", topic)
 			}

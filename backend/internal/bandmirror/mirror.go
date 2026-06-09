@@ -1,12 +1,9 @@
-// Package bandmirror polls Band chat transcripts for active migration runs and
-// mirrors new agent messages into the local agent_messages table + Redis, so
-// the existing GET /api/runs/{id} + SSE stream surface the Band collaboration
-// in the frontend with no frontend changes.
 package bandmirror
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -21,12 +18,11 @@ import (
 type Mirror struct {
 	pool     *pgxpool.Pool
 	rdb      *redis.Client
-	client   *band.AgentClient // acts as Router (a participant) to read transcripts
-	keyByID  map[string]string // band agent id → internal agent key
+	client   *band.AgentClient
+	keyByID  map[string]string
 	interval time.Duration
 }
 
-// New builds a Mirror. Returns nil if Band isn't configured for real use.
 func New(pool *pgxpool.Pool, rdb *redis.Client, cfg *config.Config) *Mirror {
 	routerKey := cfg.Band.Agent("router").APIKey
 	if (cfg.Band.Provider != "band" && cfg.Band.Provider != "http") || routerKey == "" {
@@ -47,7 +43,6 @@ func New(pool *pgxpool.Pool, rdb *redis.Client, cfg *config.Config) *Mirror {
 	}
 }
 
-// Run polls until ctx is cancelled.
 func (m *Mirror) Run(ctx context.Context) {
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
@@ -106,7 +101,6 @@ func (m *Mirror) mirrorRun(ctx context.Context, r activeRun) {
 		return
 	}
 
-	// Which Band message ids are already mirrored for this run?
 	seen := make(map[string]bool)
 	existing, err := m.pool.Query(ctx,
 		`SELECT band_message_id FROM agent_messages WHERE migration_run_id = $1 AND band_message_id IS NOT NULL`, r.id)
@@ -126,7 +120,7 @@ func (m *Mirror) mirrorRun(ctx context.Context, r activeRun) {
 		}
 		key, ok := m.keyByID[msg.SenderID]
 		if !ok {
-			continue // only mirror known Ferry agents (skip humans/unknown)
+			continue
 		}
 		m.insertAndPublish(ctx, r, key, msg)
 	}
@@ -134,10 +128,8 @@ func (m *Mirror) mirrorRun(ctx context.Context, r activeRun) {
 
 func (m *Mirror) insertAndPublish(ctx context.Context, r activeRun, agentKey string, msg band.TranscriptMessage) {
 	phase := phaseByKey(agentKey)
-	mtype := typeByKey(agentKey)
-	content := cleanMentions(msg.Content, msg.Metadata.Mentions)
-	summary := summarize(content)
-	payload, _ := json.Marshal(map[string]interface{}{"content": content})
+	cleaned := band.StripCtx(cleanMentions(msg.Content, msg.Metadata.Mentions))
+	artifacts, mainContent := band.ParseArtifacts(cleaned)
 
 	createdAt := time.Now().UTC()
 	if t, err := time.Parse(time.RFC3339, msg.InsertedAt); err == nil {
@@ -151,21 +143,39 @@ func (m *Mirror) insertAndPublish(ctx context.Context, r activeRun, agentKey str
 		}
 	}
 
+	m.store(ctx, r, msg.ID, agentKey, typeByKey(agentKey), phase,
+		summarize(mainContent), mainContent, targetAgent, createdAt)
+
+	for i, a := range artifacts {
+		summary := fmt.Sprintf("Sandbox %s result: %s", a.Kind, a.Status)
+		m.store(ctx, r, fmt.Sprintf("%s:art:%d", msg.ID, i), agentKey, "artifact_created", phase,
+			summary, a.Body, nil, createdAt)
+	}
+
+	if agentKey == "github_connector" {
+		_, _ = m.pool.Exec(ctx, `
+			UPDATE migration_runs SET status = 'completed', completed_at = NOW()
+			WHERE id = $1 AND status NOT IN ('completed', 'failed')
+		`, r.id)
+	}
+}
+
+func (m *Mirror) store(ctx context.Context, r activeRun, bandMsgID, agentKey, mtype, phase, summary, content string, targetAgent *string, createdAt time.Time) {
+	payload, _ := json.Marshal(map[string]interface{}{"content": content})
 	_, err := m.pool.Exec(ctx, `
 		INSERT INTO agent_messages
 			(company_id, project_id, migration_run_id, band_room_id, band_message_id,
 			 agent_name, message_type, phase, summary, payload, target_agent, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-	`, r.companyID, r.projectID, r.id, r.chatID, msg.ID,
+	`, r.companyID, r.projectID, r.id, r.chatID, bandMsgID,
 		agentKey, mtype, phase, summary, payload, targetAgent, createdAt)
 	if err != nil {
 		log.Printf("mirror: insert message (run %s): %v", r.id, err)
 		return
 	}
 
-	// Publish to the SSE channel in the shape the frontend expects.
 	vm := map[string]interface{}{
-		"id":        msg.ID,
+		"id":        bandMsgID,
 		"agent":     agentKey,
 		"type":      mtype,
 		"phase":     phase,
@@ -178,14 +188,6 @@ func (m *Mirror) insertAndPublish(ctx context.Context, r activeRun, agentKey str
 	}
 	if data, err := json.Marshal(vm); err == nil {
 		m.rdb.Publish(ctx, "run:"+r.id.String()+":messages", string(data))
-	}
-
-	// When the GitHub Connector reports completion, close out the run.
-	if agentKey == "github_connector" {
-		_, _ = m.pool.Exec(ctx, `
-			UPDATE migration_runs SET status = 'completed', completed_at = NOW()
-			WHERE id = $1 AND status NOT IN ('completed', 'failed')
-		`, r.id)
 	}
 }
 
@@ -223,8 +225,6 @@ func typeByKey(key string) string {
 	}
 }
 
-// cleanMentions rewrites Band's "@[[<agent-id>]]" mention tokens into readable
-// "@Name" references using the message's mention metadata.
 func cleanMentions(content string, mentions []band.Mention) string {
 	for _, mn := range mentions {
 		content = strings.ReplaceAll(content, "@[["+mn.ID+"]]", "@"+mn.Name)
@@ -232,7 +232,6 @@ func cleanMentions(content string, mentions []band.Mention) string {
 	return content
 }
 
-// summarize produces a short single-line summary from message content.
 func summarize(content string) string {
 	s := strings.TrimSpace(content)
 	s = strings.ReplaceAll(s, "\n", " ")

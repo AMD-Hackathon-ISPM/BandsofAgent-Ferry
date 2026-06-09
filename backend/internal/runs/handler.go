@@ -31,8 +31,6 @@ func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authServic
 	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc}
 }
 
-// --- View models (match frontend types.ts) ---
-
 type projectVM struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
@@ -129,8 +127,6 @@ type createRunRequest struct {
 	TargetLanguage string `json:"targetLanguage"`
 	DbEnabled      bool   `json:"dbEnabled"`
 }
-
-// --- Helpers ---
 
 var allAgentKeys = []string{
 	"router", "source_analyzer", "business_logic", "code_generator",
@@ -241,8 +237,6 @@ func toProjectVM(p db.Project) projectVM {
 		DbEnabled:      dbEnabled,
 	}
 }
-
-// --- HTTP handlers ---
 
 func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	companyID, err := uuid.Parse(middleware.GetCompanyID(r.Context()))
@@ -438,15 +432,16 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kick off the Band collaboration room (create chat, add agents, post kickoff).
 	rc := band.FerryRunContext{
 		CompanyID:          companyID.String(),
 		ProjectID:          existing.ProjectID.String(),
 		MigrationRunID:     runID.String(),
 		RepoFullName:       strPtr(project.GithubRepoUrl),
+		Branch:             strPtr(existing.TargetBranch),
 		SourceLanguage:     string(project.SourceLanguage),
 		TargetLanguage:     string(project.TargetLanguage),
 		DBMigrationEnabled: project.EnableDbMigration != nil && *project.EnableDbMigration,
+		User:               existing.CreatedBy.String(),
 	}
 	bandChatID, err := h.band.StartFerryBandRoom(r.Context(), rc)
 	if err != nil {
@@ -457,7 +452,6 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist the band room id + flip the run to planning/started.
 	if _, err := h.pool.Exec(r.Context(),
 		`UPDATE migration_runs SET band_room_id = $1, status = 'planning', started_at = NOW()
 		 WHERE company_id = $2 AND id = $3`,
@@ -568,10 +562,8 @@ func (h *Handler) ApproveDbPlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"approved": true})
 }
 
-// StreamRun is an SSE endpoint. EventSource can't set custom headers, so the
-// token may arrive as a query param instead of the Authorization header.
 func (h *Handler) StreamRun(w http.ResponseWriter, r *http.Request) {
-	// Accept token from query param (EventSource limitation) or header.
+
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -624,8 +616,6 @@ func (h *Handler) StreamRun(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// PublishMessage publishes an agent message to the SSE channel for a run.
-// Called by agent code after inserting a message into the DB.
 func (h *Handler) PublishMessage(ctx context.Context, runID string, msg AgentMessageVM) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -633,8 +623,6 @@ func (h *Handler) PublishMessage(ctx context.Context, runID string, msg AgentMes
 	}
 	return h.rdb.Publish(ctx, "run:"+runID+":messages", string(data)).Err()
 }
-
-// --- Raw query helpers ---
 
 func (h *Handler) fetchArtifacts(ctx context.Context, companyID, runID uuid.UUID) ([]artifactVM, error) {
 	rows, err := h.pool.Query(ctx, `

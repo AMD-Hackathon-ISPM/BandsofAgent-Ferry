@@ -10,38 +10,39 @@ import (
 	"github.com/ferry/backend/internal/band"
 )
 
-// AgentInfo is one agent's identity used for handoff @mentions.
 type AgentInfo struct {
 	Key    string
 	ID     string
-	Handle string // no leading "@"
+	Handle string
 	Name   string
 }
 
-// Worker is a single Band-connected agent: it consumes its inbox, runs its LLM,
-// and hands off to the next agent in the pipeline.
 type Worker struct {
-	info    AgentInfo
-	role    agentRole
-	client  *band.AgentClient
-	llm     *LLM
-	roster  map[string]AgentInfo // keyed by internal agent key (for handoff)
-	joined  map[string]bool      // chat ids whose chat_room channel we've joined
+	info        AgentInfo
+	role        agentRole
+	client      *band.AgentClient
+	llm         *LLM
+	source      *SourceProvider
+	execEnabled bool
+	runnerURL   string
+	roster      map[string]AgentInfo
+	joined      map[string]bool
 }
 
-func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, roster map[string]AgentInfo) *Worker {
+func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, source *SourceProvider, execEnabled bool, runnerURL string, roster map[string]AgentInfo) *Worker {
 	return &Worker{
-		info:   info,
-		role:   role,
-		client: client,
-		llm:    llm,
-		roster: roster,
-		joined: make(map[string]bool),
+		info:        info,
+		role:        role,
+		client:      client,
+		llm:         llm,
+		source:      source,
+		execEnabled: execEnabled,
+		runnerURL:   runnerURL,
+		roster:      roster,
+		joined:      make(map[string]bool),
 	}
 }
 
-// Run validates the agent, drains any backlog, then connects the WebSocket and
-// processes message_created events until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) error {
 	me, err := w.client.Me(ctx)
 	if err != nil {
@@ -53,7 +54,6 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	log.Printf("[%s] online as %s (%s)", w.info.Key, me.Handle, me.ID)
 
-	// Startup synchronization: drain unprocessed messages in every known chat.
 	chatIDs, err := w.client.ListChatIDs(ctx)
 	if err != nil {
 		log.Printf("[%s] list chats failed: %v", w.info.Key, err)
@@ -62,7 +62,6 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.drain(ctx, chatID)
 	}
 
-	// Connect WebSocket and subscribe.
 	px := NewPhoenixClient(w.client.APIKey())
 	if err := px.Connect(ctx); err != nil {
 		return fmt.Errorf("[%s] %w", w.info.Key, err)
@@ -80,7 +79,6 @@ func (w *Worker) Run(ctx context.Context) error {
 	return px.Run(ctx)
 }
 
-// dispatch routes inbound Phoenix events.
 func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
 	for {
 		select {
@@ -99,7 +97,7 @@ func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
 				if id := extractRoomID(ev.Payload); id != "" && !w.joined[id] {
 					if err := px.Join("chat_room:" + id); err == nil {
 						w.joined[id] = true
-						w.drain(ctx, id) // catch the message that prompted the add
+						w.drain(ctx, id)
 					}
 				}
 			}
@@ -107,10 +105,6 @@ func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
 	}
 }
 
-// drain processes currently-unprocessed messages in a chat (startup sync).
-// /messages/next also re-returns failed/processing messages, so we track the
-// ids we've already attempted this pass and stop once one repeats — otherwise a
-// message that fails (e.g. LLM error) would loop forever.
 func (w *Worker) drain(ctx context.Context, chatID string) {
 	attempted := make(map[string]bool)
 	for {
@@ -123,24 +117,34 @@ func (w *Worker) drain(ctx context.Context, chatID string) {
 			return
 		}
 		if !ok {
-			return // 204: nothing left
+			return
 		}
 		if attempted[msg.ID] {
-			return // same message came back (failed/stuck) — stop this pass
+			return
 		}
 		attempted[msg.ID] = true
 		w.handle(ctx, chatID, msg)
 	}
 }
 
-// handle runs the full processing workflow for one message.
 func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMessage) {
 	if err := w.client.MarkProcessing(ctx, chatID, msg.ID); err != nil {
 		log.Printf("[%s] mark processing failed: %v", w.info.Key, err)
 		return
 	}
 
-	prompt := w.buildPrompt(msg)
+	runCtx, _ := band.ParseCtx(msg.Content)
+
+	var execReport, artifact string
+	if w.execEnabled && w.role.execCode && !w.role.execAfter {
+		if res := w.runCodeChecks(ctx, chatID, runCtx.Tgt, "", w.role.execMode); res != nil {
+			execReport = res.promptText()
+			artifact = res.artifactBlock()
+		}
+	}
+
+	prompt := w.buildPrompt(ctx, msg, runCtx, execReport)
+
 	output, err := w.llm.Complete(ctx, w.role.system, prompt)
 	if err != nil {
 		log.Printf("[%s] llm failed: %v", w.info.Key, err)
@@ -148,9 +152,18 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		return
 	}
 
-	// Hand off to the next agent (terminal agents post nothing).
+	if w.execEnabled && w.role.execCode && w.role.execAfter {
+		if res := w.runCodeChecks(ctx, chatID, runCtx.Tgt, output, w.role.execMode); res != nil {
+			artifact = res.artifactBlock()
+		}
+	}
+
 	if next, ok := w.roster[w.role.next]; ok && w.role.next != "" {
-		content := fmt.Sprintf("%s\n\n@%s — please continue.", output, next.Handle)
+		content := output
+		if artifact != "" {
+			content += "\n\n" + artifact
+		}
+		content += fmt.Sprintf("\n\n@%s — please continue.\n\n%s", next.Handle, band.MarshalCtx(runCtx))
 		mentions := []band.Mention{{ID: next.ID, Name: next.Name, Handle: next.Handle}}
 		if _, err := w.client.SendMessage(ctx, chatID, content, mentions); err != nil {
 			log.Printf("[%s] handoff to %s failed: %v", w.info.Key, next.Handle, err)
@@ -167,14 +180,27 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	}
 }
 
-// buildPrompt renders the user prompt from the incoming message, replacing the
-// @[[id]] mention tokens Band stores with readable @Name references.
-func (w *Worker) buildPrompt(msg *band.IncomingMessage) string {
+func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, runCtx band.RunCtx, execReport string) string {
 	content := msg.Content
 	for _, m := range msg.Metadata.Mentions {
 		content = strings.ReplaceAll(content, "@[["+m.ID+"]]", "@"+m.Name)
 	}
-	return fmt.Sprintf("A message addressed to you in the migration band:\n\n%s\n\nProduce your contribution for this stage. Be concise and structured.", content)
+	content = band.StripCtx(content)
+
+	var b strings.Builder
+	if w.role.needsSource && w.source != nil {
+		if digest := w.source.Digest(ctx, runCtx); digest != "" {
+			b.WriteString("REPOSITORY SOURCE (read this real code before answering):\n\n")
+			b.WriteString(digest)
+			b.WriteString("\n\n---\n\n")
+		}
+	}
+	if execReport != "" {
+		b.WriteString(execReport)
+		b.WriteString("\n\n---\n\n")
+	}
+	fmt.Fprintf(&b, "A message addressed to you in the migration band:\n\n%s\n\nProduce your contribution for this stage. Be concise and structured.", content)
+	return b.String()
 }
 
 func extractRoomID(payload json.RawMessage) string {

@@ -1,7 +1,3 @@
-// Command agents runs the Ferry Band agent workers. Each of the 9 agents
-// connects to Band over WebSocket with its own key, consumes its inbox, runs
-// its configured LLM, and hands off to the next agent in the migration
-// pipeline. This is a separate process from the API server (cmd/api).
 package main
 
 import (

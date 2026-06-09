@@ -86,9 +86,6 @@ services:
       - ferry-network
     restart: unless-stopped
 
-  # Band agent workers: 9 agents connect to Band over WebSocket, consume their
-  # inboxes, run their configured LLMs, and hand off down the migration pipeline.
-  # Reuses the backend image (which builds both ./cmd/api and ./cmd/agents).
   agents:
     image: ferry-backend:local
     build:
@@ -98,8 +95,28 @@ services:
     command: ["./ferry-agents"]
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_HOST: redis
+      RUNNER_URL: http://runner:9090
     depends_on:
       - backend
+      - runner
+    networks:
+      - ferry-network
+    restart: unless-stopped
+
+  runner:
+    image: ferry-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ferry-runner
+    command: ["./ferry-runner"]
+    environment:
+      RUNNER_PORT: "9090"
+      SANDBOX_RUNTIME: ""
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ferry-network
     restart: unless-stopped
