@@ -1,4 +1,4 @@
-import { PHASES, PHASE_INDEX } from "@/lib/domain"
+import { PHASES, PHASE_INDEX, STATUS, type PhaseKey } from "@/lib/domain"
 import type { Run } from "@/lib/types"
 
 export type PhaseNodeState =
@@ -9,9 +9,22 @@ export type PhaseNodeState =
   | "upcoming"
   | "skipped"
 
+export function effectiveCurrentPhase(run: Run): PhaseKey | null {
+  let phase = run.currentPhase ?? STATUS[run.status].phase
+
+  for (const message of run.messages) {
+    if (!phase || PHASE_INDEX[message.phase] > PHASE_INDEX[phase]) {
+      phase = message.phase
+    }
+  }
+
+  return phase
+}
+
 export function currentPhaseIndex(run: Run): number {
   if (run.status === "completed") return PHASES.length
-  if (run.currentPhase) return PHASE_INDEX[run.currentPhase]
+  const phase = effectiveCurrentPhase(run)
+  if (phase) return PHASE_INDEX[phase]
   return -1
 }
 
