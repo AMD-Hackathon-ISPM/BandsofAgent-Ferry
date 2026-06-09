@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -47,7 +48,7 @@ func NewLLM(baseURL, apiKey, model string, limiter *Limiter) *LLM {
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{Timeout: 120 * time.Second},
+		http:    &http.Client{Timeout: 240 * time.Second},
 		limiter: limiter,
 	}
 }

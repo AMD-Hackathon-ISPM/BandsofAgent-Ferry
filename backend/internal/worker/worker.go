@@ -87,25 +87,17 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	log.Printf("[%s] online as %s (%s)", w.info.Key, me.Handle, me.ID)
 
-	chatIDs, err := w.client.ListChatIDs(ctx)
-	if err != nil {
-		log.Printf("[%s] list chats failed: %v", w.info.Key, err)
-	}
-	for _, chatID := range chatIDs {
-		w.drain(ctx, chatID)
-	}
-
+	// NOTE: we intentionally do NOT drain existing chats on startup. Old/leftover
+	// chats can contain messages stuck unprocessed (e.g. a handoff target that
+	// isn't a participant), and re-draining them every restart re-runs dead
+	// pipelines and starves new runs. New runs are delivered via agent_rooms
+	// (room_added → join + drain) and live WebSocket message_created events.
 	px := NewPhoenixClient(w.client.APIKey())
 	if err := px.Connect(ctx); err != nil {
 		return fmt.Errorf("[%s] %w", w.info.Key, err)
 	}
 	if err := px.Join("agent_rooms:" + w.info.ID); err != nil {
 		log.Printf("[%s] join agent_rooms failed: %v", w.info.Key, err)
-	}
-	for _, chatID := range chatIDs {
-		if err := px.Join("chat_room:" + chatID); err == nil {
-			w.markJoined(chatID)
-		}
 	}
 
 	go w.dispatch(ctx, px)
