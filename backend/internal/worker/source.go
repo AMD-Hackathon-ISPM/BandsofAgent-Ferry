@@ -52,6 +52,11 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 	return digest
 }
 
+// Token resolves the GitHub token for a user (OAuth login token, else PAT).
+func (s *SourceProvider) Token(ctx context.Context, userID string) string {
+	return s.resolveToken(ctx, userID)
+}
+
 func (s *SourceProvider) resolveToken(ctx context.Context, userID string) string {
 	if s.rdb != nil && userID != "" {
 		if t, err := s.rdb.Get(ctx, "github_token:"+userID).Result(); err == nil && t != "" {

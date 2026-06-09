@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/ferry/backend/internal/band"
+	"github.com/redis/go-redis/v9"
 )
 
 type AgentInfo struct {
@@ -26,10 +28,15 @@ type Worker struct {
 	execEnabled bool
 	runnerURL   string
 	roster      map[string]AgentInfo
-	joined      map[string]bool
+	rdb         *redis.Client
+	keyByID     map[string]string
+
+	mu      sync.Mutex
+	joined  map[string]bool
+	handled map[string]bool
 }
 
-func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, source *SourceProvider, execEnabled bool, runnerURL string, roster map[string]AgentInfo) *Worker {
+func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, source *SourceProvider, execEnabled bool, runnerURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
 	return &Worker{
 		info:        info,
 		role:        role,
@@ -39,8 +46,34 @@ func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LL
 		execEnabled: execEnabled,
 		runnerURL:   runnerURL,
 		roster:      roster,
+		rdb:         rdb,
+		keyByID:     keyByID,
 		joined:      make(map[string]bool),
+		handled:     make(map[string]bool),
 	}
+}
+
+// claim returns false if this message id was already handled (by the startup/
+// room drain or a WebSocket event), preventing duplicate processing.
+func (w *Worker) claim(msgID string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.handled[msgID] {
+		return false
+	}
+	w.handled[msgID] = true
+	return true
+}
+
+// markJoined returns false if this chat's channel was already joined.
+func (w *Worker) markJoined(chatID string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.joined[chatID] {
+		return false
+	}
+	w.joined[chatID] = true
+	return true
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -71,7 +104,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	for _, chatID := range chatIDs {
 		if err := px.Join("chat_room:" + chatID); err == nil {
-			w.joined[chatID] = true
+			w.markJoined(chatID)
 		}
 	}
 
@@ -94,9 +127,8 @@ func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
 				}
 				w.handle(ctx, roomID, &msg)
 			case "room_added":
-				if id := extractRoomID(ev.Payload); id != "" && !w.joined[id] {
+				if id := extractRoomID(ev.Payload); id != "" && w.markJoined(id) {
 					if err := px.Join("chat_room:" + id); err == nil {
-						w.joined[id] = true
 						w.drain(ctx, id)
 					}
 				}
@@ -128,6 +160,9 @@ func (w *Worker) drain(ctx context.Context, chatID string) {
 }
 
 func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMessage) {
+	if !w.claim(msg.ID) {
+		return // already handled via the drain or a WebSocket event
+	}
 	if err := w.client.MarkProcessing(ctx, chatID, msg.ID); err != nil {
 		log.Printf("[%s] mark processing failed: %v", w.info.Key, err)
 		return
@@ -135,11 +170,30 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 
 	runCtx, _ := band.ParseCtx(msg.Content)
 
+	// Report the message we received so the backend can surface the pipeline
+	// in the frontend (Band has no transcript API to poll).
+	w.publishMirror(ctx, runCtx.Run, msg)
+
 	var execReport, artifact string
+
+	// Reviewer: build the accumulated generated files before reviewing.
 	if w.execEnabled && w.role.execCode && !w.role.execAfter {
-		if res := w.runCodeChecks(ctx, chatID, runCtx.Tgt, "", w.role.execMode); res != nil {
+		if res := w.runCodeChecks(ctx, runCtx.Run, runCtx.Tgt, w.role.execMode); res != nil {
 			execReport = res.promptText()
 			artifact = res.artifactBlock()
+		}
+	}
+
+	// GitHub Connector: open a real PR with the accumulated files.
+	if w.role.createsPR {
+		if url, prErr := w.createPR(ctx, runCtx); prErr != nil {
+			log.Printf("[%s] PR creation failed: %v", w.info.Key, prErr)
+			execReport = "PULL REQUEST: failed — " + prErr.Error()
+			artifact = band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "failed", Body: prErr.Error()})
+		} else {
+			log.Printf("[%s] opened PR: %s", w.info.Key, url)
+			execReport = "PULL REQUEST opened: " + url
+			artifact = band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "open", Body: url})
 		}
 	}
 
@@ -152,8 +206,16 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		return
 	}
 
+	// Persist this agent's generated files for downstream stages.
+	if w.role.producesFiles {
+		if files := extractFiles(output); len(files) > 0 {
+			w.storeFiles(ctx, runCtx.Run, files)
+		}
+	}
+
+	// Test Generator: run the tests it just produced (now in the file store).
 	if w.execEnabled && w.role.execCode && w.role.execAfter {
-		if res := w.runCodeChecks(ctx, chatID, runCtx.Tgt, output, w.role.execMode); res != nil {
+		if res := w.runCodeChecks(ctx, runCtx.Run, runCtx.Tgt, w.role.execMode); res != nil {
 			artifact = res.artifactBlock()
 		}
 	}

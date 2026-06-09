@@ -12,13 +12,14 @@ type RunCtx struct {
 	Src    string
 	Tgt    string
 	User   string
+	Run    string
 }
 
 var ctxRe = regexp.MustCompile(`\[ferry-ctx ([^\]]*)\]`)
 var kvRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 func MarshalCtx(c RunCtx) string {
-	return fmt.Sprintf(`[ferry-ctx repo=%q branch=%q src=%q tgt=%q user=%q]`, c.Repo, c.Branch, c.Src, c.Tgt, c.User)
+	return fmt.Sprintf(`[ferry-ctx repo=%q branch=%q src=%q tgt=%q user=%q run=%q]`, c.Repo, c.Branch, c.Src, c.Tgt, c.User, c.Run)
 }
 
 func ParseCtx(content string) (RunCtx, bool) {
@@ -39,6 +40,8 @@ func ParseCtx(content string) (RunCtx, bool) {
 			c.Tgt = kv[2]
 		case "user":
 			c.User = kv[2]
+		case "run":
+			c.Run = kv[2]
 		}
 	}
 	return c, c.Repo != ""

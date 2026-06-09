@@ -145,7 +145,10 @@ func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (s
 		return "", fmt.Errorf("create band chat: %w", err)
 	}
 
-	mentions := make([]Mention, 0, len(roster))
+	// Add all 8 non-Router agents as participants, but @mention ONLY the source
+	// analyzer in the kickoff so the pipeline starts at one stage and proceeds
+	// linearly via handoffs (mentioning all of them starts 8 chains at once).
+	var sourceAnalyzer Mention
 	for _, a := range roster {
 		if a.Key == "router" {
 			continue
@@ -156,10 +159,15 @@ func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (s
 		if err := s.client.AddParticipant(ctx, chatID, a.ID); err != nil {
 			return "", fmt.Errorf("add participant %s: %w", a.Handle, err)
 		}
-		mentions = append(mentions, Mention{ID: a.ID, Name: a.Name, Handle: a.Handle})
+		if a.Key == "source_analyzer" {
+			sourceAnalyzer = Mention{ID: a.ID, Name: a.Name, Handle: a.Handle}
+		}
+	}
+	if sourceAnalyzer.ID == "" {
+		return "", fmt.Errorf("source_analyzer agent id missing (set BAND_SOURCE_ANALYZER_ID)")
 	}
 
-	if _, err := s.client.SendMessage(ctx, chatID, BuildKickoffMessage(rc, namespace), mentions); err != nil {
+	if _, err := s.client.SendMessage(ctx, chatID, BuildKickoffMessage(rc, namespace), []Mention{sourceAnalyzer}); err != nil {
 		return "", fmt.Errorf("send kickoff: %w", err)
 	}
 

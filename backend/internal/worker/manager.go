@@ -38,6 +38,13 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 	})
 	source := NewSourceProvider(cfg.GitHub.PAT, rdb)
 
+	keyByID := make(map[string]string)
+	for key, a := range cfg.Band.Agents {
+		if a.ID != "" {
+			keyByID[a.ID] = key
+		}
+	}
+
 	execEnabled := cfg.Features.EnableCodeExecution
 	if execEnabled {
 		log.Printf("sandbox code execution: ENABLED (runner=%q)", cfg.Sandbox.RunnerURL)
@@ -59,7 +66,7 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		client := band.NewAgentClient(baseURL, ident.APIKey)
 		llm := NewLLM(llmBase, llmKey, llmModel, limiter)
 
-		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, source, execEnabled, cfg.Sandbox.RunnerURL, roster))
+		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, source, execEnabled, cfg.Sandbox.RunnerURL, roster, rdb, keyByID))
 	}
 
 	if len(workers) == 0 {

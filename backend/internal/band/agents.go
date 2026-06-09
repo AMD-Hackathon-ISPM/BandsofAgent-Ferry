@@ -2,7 +2,6 @@ package band
 
 import (
 	"fmt"
-	"strings"
 )
 
 type FerryAgent struct {
@@ -73,15 +72,9 @@ func BuildKickoffMessage(rc FerryRunContext, namespace string) string {
 		dbFile = "none"
 	}
 
-	var mentions []string
-	for _, a := range FerryAgents(namespace) {
-		if a.Key == "router" {
-			continue
-		}
-		mentions = append(mentions, a.Mention())
-	}
+	return fmt.Sprintf(`@%s/ferrysourceanalyzer
 
-	return fmt.Sprintf(`Start Ferry migration run.
+Start Ferry migration run.
 
 Repository: %s
 
@@ -93,23 +86,15 @@ Database Migration Enabled: %t
 
 Database File: %s
 
-Create a migration strategy and coordinate all participating agents through Band.
-
-Required participants:
-
-%s
-
-Final objective:
-
-Generate migrated codebase, validate migration, and create a GitHub Pull Request.
+You are the first stage. Analyze the repository, then hand off to the next agent. The band proceeds in sequence: source analysis → business logic → code generation → DB migration → tests → review → command → GitHub PR. Each agent hands off to the next; do not mention the others now.
 
 %s`,
+		namespace,
 		rc.RepoFullName,
 		rc.SourceLanguage,
 		rc.TargetLanguage,
 		rc.DBMigrationEnabled,
 		dbFile,
-		strings.Join(mentions, "\n"),
-		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User}),
+		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User, Run: rc.MigrationRunID}),
 	)
 }

@@ -52,20 +52,8 @@ func (r *codeCheckResult) artifactBlock() string {
 	return band.MarshalArtifact(band.Artifact{Kind: r.kind, Status: r.status, Body: r.output})
 }
 
-func (w *Worker) runCodeChecks(ctx context.Context, chatID, targetLang, extraContent, mode string) *codeCheckResult {
-	msgs, err := w.client.ListMessages(ctx, chatID)
-	if err != nil {
-		log.Printf("[%s] code-check: list messages: %v", w.info.Key, err)
-		return nil
-	}
-	var all strings.Builder
-	for _, m := range msgs {
-		all.WriteString(m.Content)
-		all.WriteString("\n")
-	}
-	all.WriteString(extraContent)
-
-	files := extractFiles(all.String())
+func (w *Worker) runCodeChecks(ctx context.Context, runID, targetLang, mode string) *codeCheckResult {
+	files := w.loadFiles(ctx, runID)
 	if len(files) == 0 {
 		return nil
 	}
