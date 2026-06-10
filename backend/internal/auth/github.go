@@ -46,7 +46,7 @@ func (h *GitHubHandler) HandleBegin(w http.ResponseWriter, r *http.Request) {
 		"redirect_uri": {h.cfg.RedirectURI},
 		"state":        {state},
 
-		"scope": {"read:user user:email public_repo"},
+		"scope": {"read:user user:email repo"},
 	}
 
 	http.Redirect(w, r, "https://github.com/login/oauth/authorize?"+params.Encode(), http.StatusTemporaryRedirect)

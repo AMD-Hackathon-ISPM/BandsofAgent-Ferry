@@ -52,8 +52,19 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 	return digest
 }
 
-// Token resolves the GitHub token for a user (OAuth login token, else PAT).
+// Token resolves the GitHub token for read operations. The user's OAuth token
+// keeps repository discovery aligned with what they can see in the UI.
 func (s *SourceProvider) Token(ctx context.Context, userID string) string {
+	return s.resolveToken(ctx, userID)
+}
+
+// WriteToken resolves the token used for mutating GitHub operations. Prefer the
+// configured PAT because OAuth login tokens can be read-oriented or stale while
+// GITHUB_PAT is the operator-controlled credential intended for PR creation.
+func (s *SourceProvider) WriteToken(ctx context.Context, userID string) string {
+	if s.pat != "" {
+		return s.pat
+	}
 	return s.resolveToken(ctx, userID)
 }
 
