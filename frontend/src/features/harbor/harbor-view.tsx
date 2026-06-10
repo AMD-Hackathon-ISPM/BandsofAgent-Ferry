@@ -1,3 +1,4 @@
+// LEGACY: superseded by features/voyage (kept for comparison on this branch).
 import type { AgentKey } from "@/lib/domain"
 import type { AgentMessageVM, Run } from "@/lib/types"
 import { cn } from "@/lib/utils"

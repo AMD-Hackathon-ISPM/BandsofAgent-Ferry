@@ -225,6 +225,9 @@
 }
 
 @layer utilities {
+  .pixel-canvas {
+    image-rendering: pixelated;
+  }
   .dot-pulse {
     animation: var(--animate-dot-pulse);
   }

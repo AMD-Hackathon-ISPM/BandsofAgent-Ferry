@@ -4,23 +4,23 @@ import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   IconAlertTriangle,
-  IconAnchor,
   IconArrowLeft,
   IconMessages,
   IconReload,
+  IconShip,
 } from "@tabler/icons-react"
 
 import { canApprove } from "@/lib/domain"
 import type { AgentKey, PhaseKey } from "@/lib/domain"
 import { fetchRun } from "@/lib/api"
-import { useLiveRun, useNow } from "@/lib/hooks"
+import { useLiveRun, useMediaQuery, useNow } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
 import { cn } from "@/lib/utils"
 import { AgentRoster } from "@/features/runs/components/agent-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { RunHeader } from "@/features/runs/components/run-header"
-import { HarborView } from "@/features/harbor/harbor-view"
+import { VoyageView } from "@/features/voyage/voyage-view"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -96,7 +96,7 @@ export function RunView() {
   const [selectedPhase, setSelectedPhase] = React.useState<PhaseKey | null>(
     null
   )
-  const [pane, setPane] = React.useState("harbor")
+  const [pane, setPane] = React.useState("voyage")
 
   const {
     data: run,
@@ -155,9 +155,10 @@ function RunReady({
   const [dbApproved, setDbApproved] = React.useState(
     Boolean(run.dbPlan?.approvedBy)
   )
-  const [centerView, setCenterView] = React.useState<"harbor" | "feed">(
-    "harbor"
+  const [centerView, setCenterView] = React.useState<"voyage" | "feed">(
+    "voyage"
   )
+  const isXL = useMediaQuery("(min-width: 1280px)")
 
   const handleAction = React.useCallback(() => {
     setPane("outputs")
@@ -204,56 +205,15 @@ function RunReady({
       className="h-full"
     />
   )
-  const harbor = (
-    <HarborView
+  const voyage = (
+    <VoyageView
       run={liveRun}
       messages={messages}
       streamedIds={streamedIds}
       selectedAgent={selectedAgent}
       onSelectAgent={setSelectedAgent}
-      className="h-full"
+      logClassName={isXL ? "left-[21.5rem]" : undefined}
     />
-  )
-  const center = (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
-        <CenterToggle
-          active={centerView === "harbor"}
-          onClick={() => setCenterView("harbor")}
-          icon={<IconAnchor className="size-3.5" />}
-        >
-          Harbor
-        </CenterToggle>
-        <CenterToggle
-          active={centerView === "feed"}
-          onClick={() => setCenterView("feed")}
-          icon={<IconMessages className="size-3.5" />}
-        >
-          Band room
-        </CenterToggle>
-        <span className="ml-auto truncate px-1 text-[11px] text-muted-foreground">
-          {run.bandRoomName}
-        </span>
-      </div>
-      <div className="min-h-0 flex-1">
-        {centerView === "harbor" ? (
-          harbor
-        ) : (
-          <BandFeed
-            run={liveRun}
-            messages={messages}
-            streamedIds={streamedIds}
-            selectedAgent={selectedAgent}
-            selectedPhase={selectedPhase}
-            onClearFilters={clearFilters}
-            onAction={handleAction}
-            now={now}
-            showHeader={false}
-            className="h-full"
-          />
-        )}
-      </div>
-    </div>
   )
 
   return (
@@ -269,50 +229,95 @@ function RunReady({
 
       <RunBanner run={liveRun} onAction={handleAction} />
 
-      <div className="hidden min-h-0 flex-1 xl:grid xl:grid-cols-[20rem_minmax(0,1fr)_30rem]">
-        <div className="min-h-0 border-r border-border">{roster}</div>
-        <div className="min-h-0 border-r border-border">{center}</div>
-        <div className="min-h-0">{outputs}</div>
-      </div>
+      {isXL ? (
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          {voyage}
 
-      <div className="flex min-h-0 flex-1 flex-col xl:hidden">
-        <Tabs
-          value={pane}
-          onValueChange={setPane}
-          className="flex min-h-0 flex-1 flex-col gap-0"
-        >
-          <TabsList className="m-2 self-start">
-            <TabsTrigger value="harbor">Harbor</TabsTrigger>
-            <TabsTrigger value="feed">Band room</TabsTrigger>
-            <TabsTrigger value="band">The band</TabsTrigger>
-            <TabsTrigger value="outputs">Outputs</TabsTrigger>
-          </TabsList>
-          <TabsContent
-            value="harbor"
-            className="min-h-0 flex-1 border-t border-border"
-          >
-            {harbor}
-          </TabsContent>
-          <TabsContent
-            value="feed"
-            className="min-h-0 flex-1 border-t border-border"
-          >
-            {feed}
-          </TabsContent>
-          <TabsContent
-            value="band"
-            className="min-h-0 flex-1 overflow-y-auto border-t border-border"
-          >
+          <div className="absolute inset-y-3 left-3 z-10 flex w-80 flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md">
             {roster}
-          </TabsContent>
-          <TabsContent
-            value="outputs"
-            className="min-h-0 flex-1 overflow-y-auto border-t border-border"
-          >
+          </div>
+
+          <div className="absolute inset-y-3 right-3 z-10 flex w-96 flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md">
             {outputs}
-          </TabsContent>
-        </Tabs>
-      </div>
+          </div>
+
+          <div className="absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-card/85 px-1.5 py-1 shadow-lg backdrop-blur-md">
+            <CenterToggle
+              active={centerView === "voyage"}
+              onClick={() => setCenterView("voyage")}
+              icon={<IconShip className="size-3.5" />}
+            >
+              Voyage
+            </CenterToggle>
+            <CenterToggle
+              active={centerView === "feed"}
+              onClick={() => setCenterView("feed")}
+              icon={<IconMessages className="size-3.5" />}
+            >
+              Band room
+            </CenterToggle>
+            <span className="max-w-48 truncate px-1 text-[11px] text-muted-foreground">
+              {run.bandRoomName}
+            </span>
+          </div>
+
+          {centerView === "feed" && (
+            <div className="absolute top-14 right-[25.5rem] bottom-3 left-[21.5rem] z-10 overflow-hidden rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-md">
+              <BandFeed
+                run={liveRun}
+                messages={messages}
+                streamedIds={streamedIds}
+                selectedAgent={selectedAgent}
+                selectedPhase={selectedPhase}
+                onClearFilters={clearFilters}
+                onAction={handleAction}
+                now={now}
+                showHeader={false}
+                className="h-full"
+              />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Tabs
+            value={pane}
+            onValueChange={setPane}
+            className="flex min-h-0 flex-1 flex-col gap-0"
+          >
+            <TabsList className="m-2 self-start">
+              <TabsTrigger value="voyage">Voyage</TabsTrigger>
+              <TabsTrigger value="feed">Band room</TabsTrigger>
+              <TabsTrigger value="band">The band</TabsTrigger>
+              <TabsTrigger value="outputs">Outputs</TabsTrigger>
+            </TabsList>
+            <TabsContent
+              value="voyage"
+              className="relative min-h-0 flex-1 border-t border-border"
+            >
+              {voyage}
+            </TabsContent>
+            <TabsContent
+              value="feed"
+              className="min-h-0 flex-1 border-t border-border"
+            >
+              {feed}
+            </TabsContent>
+            <TabsContent
+              value="band"
+              className="min-h-0 flex-1 overflow-y-auto border-t border-border"
+            >
+              {roster}
+            </TabsContent>
+            <TabsContent
+              value="outputs"
+              className="min-h-0 flex-1 overflow-y-auto border-t border-border"
+            >
+              {outputs}
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
     </div>
   )
 }

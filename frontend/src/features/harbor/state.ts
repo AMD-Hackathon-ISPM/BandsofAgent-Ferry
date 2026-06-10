@@ -1,5 +1,3 @@
-import * as React from "react"
-
 import { AGENT_ORDER, type AgentKey, type StatusTone } from "@/lib/domain"
 import type { Run } from "@/lib/types"
 import { CARGO_LANE } from "./layout"
@@ -83,17 +81,4 @@ export function deriveHarborState(run: Run): HarborState {
   return { facility, lastActive, laneProgress, departed: completed }
 }
 
-export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = React.useState(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return false
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  })
-  React.useEffect(() => {
-    if (!window.matchMedia) return
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
-    const onChange = () => setReduced(mq.matches)
-    mq.addEventListener("change", onChange)
-    return () => mq.removeEventListener("change", onChange)
-  }, [])
-  return reduced
-}
+export { usePrefersReducedMotion } from "@/lib/hooks"
