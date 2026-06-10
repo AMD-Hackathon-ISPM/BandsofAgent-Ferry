@@ -132,11 +132,12 @@ export function HarborMap({
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!drag.current) return
+    const activeDrag = drag.current
+    if (!activeDrag) return
     interacted.current = true
-    const dx = e.clientX - drag.current.x
-    const dy = e.clientY - drag.current.y
-    setView((v) => ({ ...v, tx: drag.current!.tx + dx, ty: drag.current!.ty + dy }))
+    const dx = e.clientX - activeDrag.x
+    const dy = e.clientY - activeDrag.y
+    setView((v) => ({ ...v, tx: activeDrag.tx + dx, ty: activeDrag.ty + dy }))
   }
   const endDrag = () => {
     drag.current = null
