@@ -19,9 +19,9 @@ func (w *Worker) createPR(ctx context.Context, rc band.RunCtx) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("invalid repo %q", rc.Repo)
 	}
-	token := w.source.Token(ctx, rc.User)
+	token := w.source.WriteToken(ctx, rc.User)
 	if token == "" {
-		return "", fmt.Errorf("no GitHub token available (re-login with public_repo scope, or set GITHUB_PAT)")
+		return "", fmt.Errorf("no GitHub write token available (set GITHUB_PAT with repo scope, or re-login with repo scope)")
 	}
 
 	branch := "ferry-migration-" + shortID(rc.Run)
