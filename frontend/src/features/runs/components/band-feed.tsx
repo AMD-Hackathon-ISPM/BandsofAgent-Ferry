@@ -206,6 +206,7 @@ export function BandFeed({
   onAction,
   now,
   className,
+  showHeader = true,
 }: {
   run: Run
   messages: AgentMessageVM[]
@@ -216,6 +217,7 @@ export function BandFeed({
   onAction?: (m: AgentMessageVM) => void
   now: number
   className?: string
+  showHeader?: boolean
 }) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = React.useState(true)
@@ -269,27 +271,29 @@ export function BandFeed({
       className={cn("relative flex min-h-0 flex-col", className)}
       aria-label="Band room feed"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-xs font-semibold text-muted-foreground uppercase">
-            Band room <span>{run.bandRoomName}</span>
-          </h2>
+      {showHeader && (
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="truncate text-xs font-semibold text-muted-foreground uppercase">
+              Band room <span>{run.bandRoomName}</span>
+            </h2>
+          </div>
+          {hasFilter ? (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="inline-flex items-center gap-1 text-[11px] text-signal outline-none hover:underline focus-visible:underline"
+            >
+              <IconX className="size-3" />
+              Clear filter
+            </button>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              {filtered.length} messages
+            </span>
+          )}
         </div>
-        {hasFilter ? (
-          <button
-            type="button"
-            onClick={onClearFilters}
-            className="inline-flex items-center gap-1 text-[11px] text-signal outline-none hover:underline focus-visible:underline"
-          >
-            <IconX className="size-3" />
-            Clear filter
-          </button>
-        ) : (
-          <span className="text-[11px] text-muted-foreground">
-            {filtered.length} messages
-          </span>
-        )}
-      </div>
+      )}
 
       <div
         ref={scrollRef}

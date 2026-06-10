@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   IconAlertTriangle,
+  IconAnchor,
   IconArrowLeft,
+  IconMessages,
   IconReload,
 } from "@tabler/icons-react"
 
@@ -13,10 +15,12 @@ import type { AgentKey, PhaseKey } from "@/lib/domain"
 import { fetchRun } from "@/lib/api"
 import { useLiveRun, useNow } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
+import { cn } from "@/lib/utils"
 import { AgentRoster } from "@/features/runs/components/agent-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { RunHeader } from "@/features/runs/components/run-header"
+import { HarborView } from "@/features/harbor/harbor-view"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -92,7 +96,7 @@ export function RunView() {
   const [selectedPhase, setSelectedPhase] = React.useState<PhaseKey | null>(
     null
   )
-  const [pane, setPane] = React.useState("feed")
+  const [pane, setPane] = React.useState("harbor")
 
   const {
     data: run,
@@ -151,6 +155,9 @@ function RunReady({
   const [dbApproved, setDbApproved] = React.useState(
     Boolean(run.dbPlan?.approvedBy)
   )
+  const [centerView, setCenterView] = React.useState<"harbor" | "feed">(
+    "harbor"
+  )
 
   const handleAction = React.useCallback(() => {
     setPane("outputs")
@@ -197,6 +204,57 @@ function RunReady({
       className="h-full"
     />
   )
+  const harbor = (
+    <HarborView
+      run={liveRun}
+      messages={messages}
+      streamedIds={streamedIds}
+      selectedAgent={selectedAgent}
+      onSelectAgent={setSelectedAgent}
+      className="h-full"
+    />
+  )
+  const center = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+        <CenterToggle
+          active={centerView === "harbor"}
+          onClick={() => setCenterView("harbor")}
+          icon={<IconAnchor className="size-3.5" />}
+        >
+          Harbor
+        </CenterToggle>
+        <CenterToggle
+          active={centerView === "feed"}
+          onClick={() => setCenterView("feed")}
+          icon={<IconMessages className="size-3.5" />}
+        >
+          Band room
+        </CenterToggle>
+        <span className="ml-auto truncate px-1 text-[11px] text-muted-foreground">
+          {run.bandRoomName}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1">
+        {centerView === "harbor" ? (
+          harbor
+        ) : (
+          <BandFeed
+            run={liveRun}
+            messages={messages}
+            streamedIds={streamedIds}
+            selectedAgent={selectedAgent}
+            selectedPhase={selectedPhase}
+            onClearFilters={clearFilters}
+            onAction={handleAction}
+            now={now}
+            showHeader={false}
+            className="h-full"
+          />
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
@@ -213,7 +271,7 @@ function RunReady({
 
       <div className="hidden min-h-0 flex-1 xl:grid xl:grid-cols-[20rem_minmax(0,1fr)_30rem]">
         <div className="min-h-0 border-r border-border">{roster}</div>
-        <div className="min-h-0 border-r border-border">{feed}</div>
+        <div className="min-h-0 border-r border-border">{center}</div>
         <div className="min-h-0">{outputs}</div>
       </div>
 
@@ -224,10 +282,17 @@ function RunReady({
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <TabsList className="m-2 self-start">
+            <TabsTrigger value="harbor">Harbor</TabsTrigger>
             <TabsTrigger value="feed">Band room</TabsTrigger>
             <TabsTrigger value="band">The band</TabsTrigger>
             <TabsTrigger value="outputs">Outputs</TabsTrigger>
           </TabsList>
+          <TabsContent
+            value="harbor"
+            className="min-h-0 flex-1 border-t border-border"
+          >
+            {harbor}
+          </TabsContent>
           <TabsContent
             value="feed"
             className="min-h-0 flex-1 border-t border-border"
@@ -312,6 +377,35 @@ function RunBanner({
     )
   }
   return null
+}
+
+function CenterToggle({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+      )}
+    >
+      {icon}
+      {children}
+    </button>
+  )
 }
 
 export default RunView
