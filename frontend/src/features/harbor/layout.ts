@@ -1,5 +1,5 @@
 import type { AgentKey } from "@/lib/domain"
-import { HH, HW, isoToScreen, type Pt } from "./iso"
+import { isoToScreen, type Pt } from "./iso"
 
 export type FacilityKind =
   | "gateway"
@@ -72,11 +72,20 @@ export const LANE_SEGMENTS: LaneSegment[] = CARGO_LANE.slice(0, -1).map(
   },
 )
 
-const GATEWAY = ANCHORS.github_connector
 const HARBOR_MASTER = ANCHORS.commander
 
-export const ARRIVAL_POINT: Pt = { x: GATEWAY.x - 210, y: GATEWAY.y - 70 }
-export const DEPARTURE_POINT: Pt = { x: HARBOR_MASTER.x + 230, y: HARBOR_MASTER.y + 96 }
+export const ISLAND = { gx0: -2.4, gy0: -1.7, gx1: 9.2, gy1: 4.3 }
+export const ISLAND_DEPTH = 54
+
+// Quay landmass (tan) the facilities stand on.
+export const QUAY = { gx0: -1, gy0: 0.85, gx1: 8, gy1: 3.5, h: 13 }
+// Offshore pad for the control tower.
+export const TOWER_PAD = { gx0: 1.5, gy0: -1.15, gx1: 3.5, gy1: 0.3, h: 15 }
+
+export const FERRY_AT: Pt = isoToScreen(0.4, -0.05)
+export const BARGE_AT: Pt = isoToScreen(5.6, -0.55)
+export const TUG_ATS: Pt[] = [isoToScreen(-1.5, 1.9), isoToScreen(3.4, -1.3)]
+export const DEPARTURE_POINT: Pt = { x: HARBOR_MASTER.x + 250, y: HARBOR_MASTER.y + 110 }
 
 export interface SceneBounds {
   minX: number
@@ -88,33 +97,32 @@ export interface SceneBounds {
 }
 
 export function sceneBounds(): SceneBounds {
+  const corners = [
+    isoToScreen(ISLAND.gx0, ISLAND.gy0),
+    isoToScreen(ISLAND.gx1, ISLAND.gy0),
+    isoToScreen(ISLAND.gx1, ISLAND.gy1),
+    isoToScreen(ISLAND.gx0, ISLAND.gy1),
+  ]
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-
-  for (const f of FACILITIES) {
-    const a = facilityAnchor(f)
-    minX = Math.min(minX, a.x - HW * f.footprint)
-    maxX = Math.max(maxX, a.x + HW * f.footprint)
-    minY = Math.min(minY, a.y - HH - f.height)
-    maxY = Math.max(maxY, a.y + HH)
-  }
-
-  for (const p of [ARRIVAL_POINT, DEPARTURE_POINT]) {
+  for (const p of corners) {
     minX = Math.min(minX, p.x)
     maxX = Math.max(maxX, p.x)
     minY = Math.min(minY, p.y)
     maxY = Math.max(maxY, p.y)
   }
 
-  const padX = 120
-  const padTop = 90
-  const padBottom = 120
-  minX -= padX
-  maxX += padX
-  minY -= padTop
-  maxY += padBottom
+  // Tower rises above the top edge; the slab adds depth below.
+  minY -= 80
+  maxY += ISLAND_DEPTH
+
+  const pad = 28
+  minX -= pad
+  maxX += pad
+  minY -= pad
+  maxY += pad
 
   return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY }
 }

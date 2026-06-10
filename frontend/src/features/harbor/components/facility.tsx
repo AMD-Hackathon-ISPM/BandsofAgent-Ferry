@@ -1,68 +1,38 @@
 import { AGENTS } from "@/lib/domain"
-import { boxFaces, HH, HW, poly, type Pt } from "../iso"
+import { HH, HW, isoBox, mix, type Pt } from "../iso"
 import { facilityAnchor, type FacilityDef } from "../layout"
 import { VISUAL_ACCENT, type FacilityVisual } from "../state"
+import { IsoBox, Shadow, Windows } from "./prims"
 
-function mix(color: string, other: string, pct: number): string {
-  return `color-mix(in oklch, ${color} ${pct}%, ${other})`
+const WARM = "oklch(0.86 0.12 86)"
+const APRON = "oklch(0.64 0.02 82)"
+
+function up(p: Pt, d: number): Pt {
+  return { x: p.x, y: p.y - d }
 }
 
-function lights(c: Pt, fp: number, height: number): Pt[] {
-  const start = { x: c.x, y: c.y + HH * fp - height }
-  const end = { x: c.x + HW * fp, y: c.y - height }
-  return [0.32, 0.5, 0.68].map((t) => ({
-    x: start.x + (end.x - start.x) * t,
-    y: start.y + (end.y - start.y) * t + 7,
-  }))
-}
-
-function Crane({ c, fp, height, active }: { c: Pt; fp: number; height: number; active: boolean }) {
-  const baseX = c.x + HW * fp * 0.42
-  const baseY = c.y - height
-  const topY = baseY - 46
-  const armX = c.x - HW * fp * 0.5
-  const stroke = "color-mix(in oklch, var(--foreground) 55%, transparent)"
+function Crane({ base, fp, active }: { base: Pt; fp: number; active: boolean }) {
+  const baseX = base.x + HW * fp * 0.4
+  const baseY = base.y
+  const topY = baseY - 48
+  const armX = base.x - HW * fp * 0.55
+  const mid = (baseX + armX) / 2
+  const stroke = "color-mix(in oklch, var(--foreground) 52%, transparent)"
   return (
     <g>
       <line x1={baseX} y1={baseY} x2={baseX} y2={topY} stroke={stroke} strokeWidth={2.5} />
-      <line x1={baseX} y1={topY} x2={armX} y2={topY - 8} stroke={stroke} strokeWidth={2.5} />
+      <line x1={baseX} y1={topY} x2={armX} y2={topY - 7} stroke={stroke} strokeWidth={2.5} />
       <g className={active ? "harbor-load" : undefined}>
-        <line
-          x1={(baseX + armX) / 2}
-          y1={topY - 4}
-          x2={(baseX + armX) / 2}
-          y2={topY + 14}
-          stroke={stroke}
-          strokeWidth={1.25}
-        />
+        <line x1={mid} y1={topY - 3} x2={mid} y2={topY + 13} stroke={stroke} strokeWidth={1.25} />
         <rect
-          x={(baseX + armX) / 2 - 6}
-          y={topY + 14}
+          x={mid - 6}
+          y={topY + 13}
           width={12}
           height={9}
           rx={1}
-          fill="color-mix(in oklch, var(--agent-codegen) 70%, #000 12%)"
+          fill="color-mix(in oklch, var(--agent-codegen) 72%, #000 12%)"
         />
       </g>
-    </g>
-  )
-}
-
-function MiniStack({ c, color }: { c: Pt; color: string }) {
-  const box = (o: Pt, h: number) => {
-    const f = boxFaces({ x: c.x + o.x, y: c.y + o.y }, h, 0.22)
-    return (
-      <g>
-        <polygon points={poly(f.left)} fill={mix(color, "#000", 52)} />
-        <polygon points={poly(f.right)} fill={mix(color, "#000", 66)} />
-        <polygon points={poly(f.top)} fill={mix(color, "white", 70)} />
-      </g>
-    )
-  }
-  return (
-    <g opacity={0.9}>
-      {box({ x: -16, y: 8 }, 13)}
-      {box({ x: 2, y: 14 }, 16)}
     </g>
   )
 }
@@ -82,6 +52,7 @@ export function Facility({
   const Icon = meta.icon
   const c = facilityAnchor(def)
   const fp = def.footprint
+  const bodyFp = fp * 0.8
   const accent = VISUAL_ACCENT[visual]
   const isRunning = visual === "running"
   const isSkipped = visual === "skipped"
@@ -89,100 +60,94 @@ export function Facility({
   const isSuccess = visual === "success"
 
   const base = isSkipped
-    ? mix(meta.color, "var(--muted)", 26)
+    ? mix(meta.color, "var(--muted)", 24)
     : visual === "idle"
-      ? mix(meta.color, "var(--muted)", 62)
+      ? mix(meta.color, "var(--muted)", 58)
       : meta.color
 
-  const faces = boxFaces(c, def.height, fp)
-  const roofCenter = { x: c.x, y: c.y - def.height }
-  const apex = { x: c.x, y: c.y - HH * fp - def.height }
-  const lightPts = lights(c, fp, def.height)
-  const lightFill = isSkipped
-    ? "transparent"
-    : accent ?? "color-mix(in oklch, var(--warning) 78%, transparent)"
-
-  const labelTop = c.y + HH * fp + 18
+  const apronTop = up(c, 4)
+  const body = isoBox(apronTop, bodyFp, bodyFp, def.height)
+  const roofBase = up(apronTop, def.height)
+  const roofCenter = up(roofBase, 4)
+  const litColor = isFailed ? "var(--destructive)" : isRunning ? accent ?? WARM : WARM
+  const rows = Math.max(1, Math.round(def.height / 13))
 
   return (
     <g
       onClick={onSelect}
       style={{ cursor: onSelect ? "pointer" : "default" }}
-      opacity={isSkipped ? 0.55 : 1}
+      opacity={isSkipped ? 0.6 : 1}
     >
-      <ellipse
-        cx={c.x}
-        cy={c.y + HH * fp * 0.5}
-        rx={HW * fp * 1.05}
-        ry={HH * fp * 0.62}
-        fill="#000"
-        opacity={0.22}
-      />
+      <Shadow c={{ x: c.x, y: c.y + HH * fp * 0.45 }} rx={HW * fp * 1.08} ry={HH * fp * 0.66} />
 
       {accent && (isRunning || visual === "waiting" || isFailed) && (
         <ellipse
           className={isRunning ? "harbor-beacon" : isFailed ? "harbor-flash" : undefined}
           cx={c.x}
           cy={c.y}
-          rx={HW * fp * 1.25}
-          ry={HH * fp * 1.2}
+          rx={HW * fp * 1.3}
+          ry={HH * fp * 1.25}
           fill={accent}
           opacity={0.18}
         />
       )}
 
-      <polygon
-        points={poly(faces.left)}
-        fill={mix(base, "#000", 52)}
-        stroke={isSkipped ? "color-mix(in oklch, var(--border) 60%, transparent)" : undefined}
-        strokeDasharray={isSkipped ? "3 3" : undefined}
-      />
-      <polygon points={poly(faces.right)} fill={mix(base, "#000", 68)} />
-      <polygon
-        points={poly(faces.top)}
-        fill={mix(base, "white", isSkipped ? 30 : 74)}
+      <IsoBox c={c} du={fp} dv={fp} h={4} color={APRON} />
+
+      <IsoBox
+        c={apronTop}
+        du={bodyFp}
+        dv={bodyFp}
+        h={def.height}
+        color={base}
         stroke={selected ? accent ?? "var(--signal)" : undefined}
-        strokeWidth={selected ? 2 : undefined}
       />
 
-      {!isSkipped &&
-        lightPts.map((p, i) => (
-          <circle
-            key={i}
-            className={isRunning ? "harbor-beacon" : undefined}
-            cx={p.x}
-            cy={p.y}
-            r={2.2}
-            fill={lightFill}
-            opacity={isRunning || isFailed ? 1 : 0.85}
-          />
-        ))}
+      {!isSkipped && (
+        <>
+          <Windows face={body.right} rows={rows} cols={4} lit litColor={litColor} />
+          <Windows face={body.left} rows={rows} cols={4} lit={false} litColor={litColor} />
+        </>
+      )}
+
+      <IsoBox
+        c={roofBase}
+        du={bodyFp * 0.92}
+        dv={bodyFp * 0.92}
+        h={4}
+        color={mix(base, "#000", 70)}
+      />
 
       {def.hasCrane && !isSkipped && (
-        <Crane c={c} fp={fp} height={def.height} active={isRunning} />
+        <Crane base={roofBase} fp={fp} active={isRunning} />
       )}
 
       {def.kind === "tower" && (
         <g>
           <line
-            x1={apex.x}
-            y1={apex.y}
-            x2={apex.x}
-            y2={apex.y - 16}
+            x1={roofCenter.x}
+            y1={roofCenter.y}
+            x2={roofCenter.x}
+            y2={roofCenter.y - 16}
             stroke="color-mix(in oklch, var(--foreground) 50%, transparent)"
             strokeWidth={2}
           />
           <circle
             className={isRunning ? "harbor-beacon" : undefined}
-            cx={apex.x}
-            cy={apex.y - 18}
+            cx={roofCenter.x}
+            cy={roofCenter.y - 18}
             r={3}
             fill={accent ?? "var(--signal)"}
           />
         </g>
       )}
 
-      {isSuccess && <MiniStack c={c} color={meta.color} />}
+      {isSuccess && (
+        <g>
+          <IsoBox c={{ x: c.x - HW * fp * 0.7, y: c.y + HH * fp * 0.3 }} du={0.34} dv={0.2} h={11} color={meta.color} />
+          <IsoBox c={{ x: c.x - HW * fp * 0.4, y: c.y + HH * fp * 0.55 }} du={0.34} dv={0.2} h={14} color={mix(meta.color, "#000", 75)} />
+        </g>
+      )}
 
       <g transform={`translate(${roofCenter.x - 11}, ${roofCenter.y - 11})`}>
         <rect
@@ -191,34 +156,18 @@ export function Facility({
           width={22}
           height={22}
           rx={5}
-          fill={mix("var(--card)", accent ?? meta.color, 22)}
+          fill={mix("var(--card)", accent ?? meta.color, 24)}
           stroke={mix(meta.color, "transparent", 55)}
           strokeWidth={1}
         />
-        <g
-          transform="translate(3,3)"
-          style={{ color: isSkipped ? "var(--muted-foreground)" : meta.color }}
-        >
+        <g transform="translate(3,3)" style={{ color: isSkipped ? "var(--muted-foreground)" : meta.color }}>
           <Icon size={16} stroke={1.8} />
         </g>
       </g>
 
-      {def.kind === "tower" && accent && isRunning && (
-        <circle
-          className="harbor-beacon"
-          cx={roofCenter.x}
-          cy={roofCenter.y}
-          r={15}
-          fill="none"
-          stroke={accent}
-          strokeWidth={1.5}
-          opacity={0.5}
-        />
-      )}
-
       <text
         x={c.x}
-        y={labelTop}
+        y={c.y + HH * fp + 18}
         textAnchor="middle"
         fontSize={11}
         fontWeight={600}
@@ -232,7 +181,7 @@ export function Facility({
       </text>
       <text
         x={c.x}
-        y={labelTop + 13}
+        y={c.y + HH * fp + 31}
         textAnchor="middle"
         fontSize={9.5}
         fill="var(--muted-foreground)"

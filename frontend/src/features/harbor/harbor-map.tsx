@@ -5,17 +5,20 @@ import type { AgentKey } from "@/lib/domain"
 import type { Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
-  ARRIVAL_POINT,
+  BARGE_AT,
   DEPARTURE_POINT,
   FACILITIES,
+  FERRY_AT,
   sceneBounds,
+  TUG_ATS,
 } from "./layout"
 import { deriveHarborState } from "./state"
 import { useVoyages } from "./use-voyages"
 import { HarborWater } from "./components/water"
 import { RouteLayer } from "./components/routes"
 import { Facility } from "./components/facility"
-import { Cargo, Ship } from "./components/cargo"
+import { SceneryBack, SceneryFront } from "./components/scenery"
+import { Barge, Cargo, Ferry, Tug } from "./components/cargo"
 
 interface View {
   scale: number
@@ -71,6 +74,11 @@ export function HarborMap({
     },
     [bounds],
   )
+
+  React.useLayoutEffect(() => {
+    const el = wrapRef.current
+    if (el) setSize({ w: el.clientWidth, h: el.clientHeight })
+  }, [])
 
   React.useEffect(() => {
     const el = wrapRef.current
@@ -158,7 +166,13 @@ export function HarborMap({
             <HarborWater bounds={bounds} />
             <RouteLayer facility={harbor.facility} />
 
-            {started && <Ship at={ARRIVAL_POINT} accent="var(--agent-github)" />}
+            {TUG_ATS.map((p, i) => (
+              <Tug key={i} at={p} />
+            ))}
+            <Barge at={BARGE_AT} loaded />
+            {started && <Ferry at={FERRY_AT} />}
+
+            <SceneryBack />
 
             {DEPTH_SORTED.map((def) => (
               <Facility
@@ -177,13 +191,13 @@ export function HarborMap({
               />
             ))}
 
+            <SceneryFront />
+
             {voyages.map((v) => (
               <Cargo key={v.id} voyage={v} />
             ))}
 
-            {harbor.departed && (
-              <Ship at={DEPARTURE_POINT} accent="var(--success)" />
-            )}
+            {harbor.departed && <Ferry at={DEPARTURE_POINT} departing />}
           </g>
         )}
       </svg>

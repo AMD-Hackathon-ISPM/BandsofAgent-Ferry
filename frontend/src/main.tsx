@@ -12,10 +12,12 @@ import Login from "@/routes/login"
 import AuthCallback from "@/routes/auth-callback"
 import RunView from "@/routes/run"
 import NotFound from "@/routes/not-found"
+import HarborPreview from "@/routes/harbor-preview"
 
 const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
   { path: "/auth/callback", element: <AuthCallback /> },
+  { path: "/_harbor", element: <HarborPreview /> },
   {
     element: <AppLayout />,
     children: [
