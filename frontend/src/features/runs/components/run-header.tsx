@@ -24,7 +24,7 @@ import { StatusBadge } from "@/features/migrations/components/status-badge"
 import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
 import { Button } from "@/components/ui/button"
 
-const ACTION_BUTTON_CLASS = "h-12 w-40 justify-center px-5 text-base"
+const ACTION_BUTTON_CLASS = "h-8 min-w-28 justify-center px-3 text-sm"
 
 function RunningDots() {
   return (
@@ -131,7 +131,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   if (run.status === "completed") {
     return (
       <Button
-        size="lg"
+        size="sm"
         className={cn(
           ACTION_BUTTON_CLASS,
           "border-success/40 bg-success/15 text-success hover:bg-success/20"
@@ -157,7 +157,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   ) {
     return (
       <Button
-        size="lg"
+        size="sm"
         disabled={rerunMutation.isPending}
         className={cn(
           ACTION_BUTTON_CLASS,
@@ -174,7 +174,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   if (live) {
     return (
       <Button
-        size="lg"
+        size="sm"
         disabled={cancelMutation.isPending}
         className={cn(
           ACTION_BUTTON_CLASS,
@@ -187,7 +187,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
         {isStopPending ? (
           <>
             <span
-              className="dot-pulse size-3 rounded-[3px] bg-destructive"
+              className="dot-pulse size-2 rounded-[2px] bg-destructive"
               aria-hidden="true"
             />
             Stopping
@@ -196,7 +196,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
         ) : (
           <>
             <span
-              className="dot-pulse size-3 rounded-[3px] bg-warning"
+              className="dot-pulse size-2 rounded-[2px] bg-warning"
               aria-hidden="true"
             />
             Running
@@ -209,7 +209,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
 
   return (
     <Button
-      size="lg"
+      size="sm"
       disabled={startMutation.isPending}
       className={cn(
         ACTION_BUTTON_CLASS,
@@ -246,72 +246,61 @@ export function RunHeader({
 
   return (
     <header className={cn("border-b border-border bg-background", className)}>
-      <div className="flex min-h-36 flex-col gap-8 px-5 py-7 sm:px-8">
-        <div className="flex items-start justify-between gap-6">
-          <div className="flex min-w-0 gap-4">
-            <Button
-              asChild
-              size="icon-sm"
-              variant="ghost"
-              className="mt-1 shrink-0 text-muted-foreground"
-              aria-label="Back to runs"
-            >
-              <Link to="/">
-                <IconChevronLeft />
-              </Link>
-            </Button>
+      <div className="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:px-4">
+        <Button
+          asChild
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0 text-muted-foreground"
+          aria-label="Back to runs"
+        >
+          <Link to="/">
+            <IconChevronLeft />
+          </Link>
+        </Button>
 
-            <div className="min-w-0">
-              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-                <h1 className="truncate text-2xl font-semibold text-foreground">
-                  {run.project.name}
-                </h1>
-                <span className="tabular text-2xl text-muted-foreground/65">
-                  Run #{run.runNumber}
-                </span>
-                <StatusBadge status={run.status} className="h-7 px-2 text-sm" />
-              </div>
-
-              <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-muted-foreground">
-                <LangRoute
-                  source={run.project.sourceLanguage}
-                  target={run.project.targetLanguage}
-                  className="text-[13px]"
-                />
-                <span className="inline-flex items-center gap-1.5 font-mono">
-                  <IconGitCommit className="size-4" />
-                  <span className="tabular">{shortSha(run.sourceCommit)}</span>
-                </span>
-                <span className="inline-flex min-w-0 items-center gap-1.5 font-mono">
-                  <IconGitBranch className="size-4 shrink-0" />
-                  <span className="max-w-56 truncate">{run.targetBranch}</span>
-                </span>
-                {run.startedAt && (
-                  <span className="inline-flex items-center gap-1.5 font-mono">
-                    <IconClock className="size-4" />
-                    <span
-                      className="tabular"
-                      aria-live={live ? "off" : undefined}
-                    >
-                      {timer}
-                    </span>
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-3">
-            <RunActionButton run={run} role={role} />
-          </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="truncate text-[15px] font-semibold text-foreground">
+            {run.project.name}
+          </h1>
+          <span className="tabular text-sm text-muted-foreground/65">
+            #{run.runNumber}
+          </span>
+          <StatusBadge status={run.status} className="h-5 px-1.5 text-[11px]" />
         </div>
 
-        <div className="mx-auto w-full max-w-7xl px-2 pb-2">
+        <div className="hidden items-center gap-x-3.5 text-xs text-muted-foreground lg:flex">
+          <LangRoute
+            source={run.project.sourceLanguage}
+            target={run.project.targetLanguage}
+            className="text-xs"
+          />
+          <span className="inline-flex items-center gap-1 font-mono">
+            <IconGitCommit className="size-3.5" />
+            <span className="tabular">{shortSha(run.sourceCommit)}</span>
+          </span>
+          <span className="hidden min-w-0 items-center gap-1 font-mono 2xl:inline-flex">
+            <IconGitBranch className="size-3.5 shrink-0" />
+            <span className="max-w-44 truncate">{run.targetBranch}</span>
+          </span>
+          {run.startedAt && (
+            <span className="inline-flex items-center gap-1 font-mono">
+              <IconClock className="size-3.5" />
+              <span className="tabular" aria-live={live ? "off" : undefined}>
+                {timer}
+              </span>
+            </span>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-3">
           <PhasePipeline
             run={run}
             selected={selectedPhase}
             onSelect={onSelectPhase}
+            density="compact"
           />
+          <RunActionButton run={run} role={role} />
         </div>
       </div>
     </header>

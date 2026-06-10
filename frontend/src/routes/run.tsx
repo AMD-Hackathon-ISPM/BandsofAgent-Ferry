@@ -28,22 +28,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 function RunSkeleton() {
   return (
     <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
-      <div className="border-b border-border px-4 py-2.5">
-        <div className="flex items-center gap-3">
-          <Skeleton className="size-7 shrink-0" />
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="h-4 w-64" />
-        </div>
-        <div className="mt-3 flex items-center gap-3 pb-2.5">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div
-              key={i}
-              className="flex flex-1 items-center gap-3 last:flex-none"
-            >
-              <Skeleton className="size-7 shrink-0" />
-              {i < 6 && <span className="h-px flex-1 bg-border" />}
-            </div>
-          ))}
+      <div className="flex min-h-14 items-center gap-3 border-b border-border px-3 py-2 sm:px-4">
+        <Skeleton className="size-7 shrink-0" />
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="hidden h-4 w-64 lg:block" />
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <Skeleton key={i} className="size-7 shrink-0" />
+            ))}
+          </div>
+          <Skeleton className="h-8 w-28" />
         </div>
       </div>
       <div className="grid flex-1 grid-cols-1 xl:grid-cols-[20rem_minmax(0,1fr)_30rem]">
