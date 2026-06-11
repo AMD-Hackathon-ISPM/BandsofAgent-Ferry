@@ -27,21 +27,33 @@ export function ShipLog({
   messages,
   streamedIds,
   className,
+  docked = false,
 }: {
   messages: AgentMessageVM[]
   streamedIds: Set<string>
   className?: string
+  /** Render as a flush panel section instead of a floating overlay card. */
+  docked?: boolean
 }) {
-  const recent = messages.slice(-6).reverse()
+  const recent = messages.slice(docked ? -40 : -6).reverse()
 
   return (
     <div
       className={cn(
-        "pointer-events-none absolute bottom-3 left-3 z-10 w-72 max-w-[calc(100%-1.5rem)]",
+        docked
+          ? "shrink-0"
+          : "pointer-events-none absolute bottom-3 left-3 z-10 w-72 max-w-[calc(100%-1.5rem)]",
         className
       )}
     >
-      <div className="pointer-events-auto overflow-hidden rounded-md border border-border bg-card/85 shadow-lg backdrop-blur-sm">
+      <div
+        className={cn(
+          "overflow-hidden",
+          docked
+            ? "border-t border-border"
+            : "pointer-events-auto rounded-md border border-border bg-card/85 shadow-lg backdrop-blur-sm"
+        )}
+      >
         <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
           <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
             Ship&apos;s log
@@ -56,7 +68,12 @@ export function ShipLog({
             Nothing in the log yet.
           </p>
         ) : (
-          <ul className="flex flex-col">
+          <ul
+            className={cn(
+              "flex flex-col",
+              docked && "max-h-56 overflow-y-auto"
+            )}
+          >
             {recent.map((m) => {
               const meta = AGENTS[m.agent]
               return (

@@ -34,7 +34,8 @@ export function VoyageView(props: {
   selectedAgent?: AgentKey | null
   onSelectAgent?: (a: AgentKey | null) => void
   className?: string
-  logClassName?: string
+  /** Hide the floating ship's log overlay (when it is docked elsewhere). */
+  showLog?: boolean
   progressClassName?: string
 }) {
   const {
@@ -42,7 +43,7 @@ export function VoyageView(props: {
     messages,
     streamedIds,
     className,
-    logClassName,
+    showLog = true,
     progressClassName,
   } = props
   const voyage = deriveVoyage(run)
@@ -66,11 +67,9 @@ export function VoyageView(props: {
         <canvas ref={canvasRef} className="pixel-canvas block" />
       </div>
 
-      <ShipLog
-        messages={messages}
-        streamedIds={streamedIds}
-        className={logClassName}
-      />
+      {showLog && (
+        <ShipLog messages={messages} streamedIds={streamedIds} />
+      )}
       {selectedHarbor !== null && (
         <HarborPopup
           run={run}

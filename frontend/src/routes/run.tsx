@@ -5,6 +5,8 @@ import { toast } from "sonner"
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconChevronLeft,
+  IconChevronRight,
   IconMessages,
   IconReload,
   IconShip,
@@ -19,6 +21,7 @@ import { cn } from "@/lib/utils"
 import { AgentRoster } from "@/features/runs/components/agent-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
+import { ShipLog } from "@/features/voyage/ship-log"
 import { RunHeader } from "@/features/runs/components/run-header"
 import { VoyageView } from "@/features/voyage/voyage-view"
 import { Button } from "@/components/ui/button"
@@ -41,7 +44,7 @@ function RunSkeleton() {
           <Skeleton className="h-8 w-28" />
         </div>
       </div>
-      <div className="grid flex-1 grid-cols-1 xl:grid-cols-[20rem_minmax(0,1fr)_30rem]">
+      <div className="grid flex-1 grid-cols-1 xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
         <div className="hidden flex-col gap-3 border-r border-border p-3 xl:flex">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-9 w-full" />
@@ -153,6 +156,8 @@ function RunReady({
   const [centerView, setCenterView] = React.useState<"voyage" | "feed">(
     "voyage"
   )
+  const [leftOpen, setLeftOpen] = React.useState(true)
+  const [rightOpen, setRightOpen] = React.useState(true)
   const isXL = useMediaQuery("(min-width: 1280px)")
 
   const handleAction = React.useCallback(() => {
@@ -169,6 +174,9 @@ function RunReady({
     setSelectedPhase(null)
   }
 
+  const activeAgents = liveRun.agents.filter(
+    (a) => a.status === "active"
+  ).length
   const roster = (
     <AgentRoster
       run={liveRun}
@@ -207,7 +215,7 @@ function RunReady({
       streamedIds={streamedIds}
       selectedAgent={selectedAgent}
       onSelectAgent={setSelectedAgent}
-      logClassName={isXL ? "left-[21.5rem]" : undefined}
+      showLog={!isXL}
     />
   )
 
@@ -228,13 +236,30 @@ function RunReady({
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {voyage}
 
-          <div className="absolute inset-y-3 left-3 z-10 flex w-80 flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md">
-            {roster}
-          </div>
+          <FolderPanel
+            side="left"
+            label="The band"
+            badge={activeAgents > 0 ? String(activeAgents) : undefined}
+            open={leftOpen}
+            onOpenChange={setLeftOpen}
+            className="w-72"
+          >
+            <div className="min-h-0 flex-1 overflow-hidden">{roster}</div>
+            <ShipLog messages={messages} streamedIds={streamedIds} docked />
+          </FolderPanel>
 
-          <div className="absolute inset-y-3 right-3 z-10 flex w-96 flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md">
+          <FolderPanel
+            side="right"
+            label="Outputs"
+            badge={
+              run.artifacts.length > 0 ? String(run.artifacts.length) : undefined
+            }
+            open={rightOpen}
+            onOpenChange={setRightOpen}
+            className="w-80"
+          >
             {outputs}
-          </div>
+          </FolderPanel>
 
           <div className="absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-card/85 px-1.5 py-1 shadow-lg backdrop-blur-md">
             <CenterToggle
@@ -257,7 +282,13 @@ function RunReady({
           </div>
 
           {centerView === "feed" && (
-            <div className="absolute top-14 right-[25.5rem] bottom-3 left-[21.5rem] z-10 overflow-hidden rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-md">
+            <div
+              className={cn(
+                "absolute top-14 bottom-3 z-10 overflow-hidden rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-md transition-[left,right] duration-300 ease-in-out",
+                leftOpen ? "left-83" : "left-8",
+                rightOpen ? "right-91" : "right-8"
+              )}
+            >
               <BandFeed
                 run={liveRun}
                 messages={messages}
@@ -377,6 +408,95 @@ function RunBanner({
     )
   }
   return null
+}
+
+function FolderPanel({
+  side,
+  label,
+  badge,
+  open,
+  onOpenChange,
+  className,
+  children,
+}: {
+  side: "left" | "right"
+  label: string
+  badge?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  className?: string
+  children: React.ReactNode
+}) {
+  const isLeft = side === "left"
+  const Chevron = isLeft ? IconChevronLeft : IconChevronRight
+  return (
+    <div
+      className={cn(
+        "absolute inset-y-3 z-10 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]",
+        isLeft ? "left-3" : "right-3",
+        !open &&
+          (isLeft
+            ? "-translate-x-[calc(100%+0.75rem)]"
+            : "translate-x-[calc(100%+0.75rem)]"),
+        className
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        aria-label={`${open ? "Hide" : "Show"} ${label.toLowerCase()} panel`}
+        className={cn(
+          "group/tab absolute top-10.25 z-10 flex flex-col items-center gap-1.5 border border-border bg-card/90 px-1 py-2.5 text-muted-foreground backdrop-blur-md transition-colors hover:text-foreground",
+          isLeft
+            ? "left-[calc(100%-1px)] rounded-r-lg border-l-0"
+            : "right-[calc(100%-1px)] rounded-l-lg border-r-0"
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -top-2 size-2",
+            isLeft
+              ? "left-0 bg-[radial-gradient(circle_at_100%_0,transparent_7.5px,color-mix(in_srgb,var(--card)_90%,transparent)_8px)]"
+              : "right-0 bg-[radial-gradient(circle_at_0_0,transparent_7.5px,color-mix(in_srgb,var(--card)_90%,transparent)_8px)]"
+          )}
+        />
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -bottom-2 size-2",
+            isLeft
+              ? "left-0 bg-[radial-gradient(circle_at_100%_100%,transparent_7.5px,color-mix(in_srgb,var(--card)_90%,transparent)_8px)]"
+              : "right-0 bg-[radial-gradient(circle_at_0_100%,transparent_7.5px,color-mix(in_srgb,var(--card)_90%,transparent)_8px)]"
+          )}
+        />
+        <Chevron
+          className={cn(
+            "size-3.5 transition-transform duration-500",
+            !open && "rotate-180"
+          )}
+        />
+        <span className="text-[10px] font-semibold tracking-wide uppercase [writing-mode:vertical-rl]">
+          {label}
+        </span>
+        {badge && (
+          <span className="tabular text-[10px] text-muted-foreground/70">
+            {badge}
+          </span>
+        )}
+      </button>
+      <div
+        aria-hidden={!open}
+        className={cn(
+          "flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md transition-opacity duration-500",
+          !open && "pointer-events-none opacity-60"
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  )
 }
 
 function CenterToggle({
