@@ -79,7 +79,7 @@ export function VoyageView(props: {
           inspecting ? "opacity-100" : "opacity-0"
         )}
       >
-        Drag or arrow keys to pan — Esc to return
+        Drag to pan — scroll to zoom — Esc to return
       </div>
 
       {voyage.mode === "pending" && !inspecting && (

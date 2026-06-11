@@ -39,6 +39,13 @@ export interface VoxelCam {
   px: number
   py: number
   pz: number
+  /**
+   * Vertical share of the depth axis. 0.5 (default) is the classic 2:1 iso
+   * squash; 0 collapses depth entirely — a true orthographic elevation.
+   */
+  tilt?: number
+  /** Vertical px per voxel of height; defaults to KZ. 1 = square voxels. */
+  kz?: number
 }
 
 export function projectPoint(
@@ -49,11 +56,13 @@ export function projectPoint(
 ): { x: number; y: number } {
   const c = Math.cos(cam.yaw)
   const s = Math.sin(cam.yaw)
+  const tilt = cam.tilt ?? 0.5
+  const kz = cam.kz ?? KZ
   const rx = (x - cam.px) * c + (y - cam.py) * s
   const ry = -(x - cam.px) * s + (y - cam.py) * c
   return {
     x: cam.ox + rx * cam.zoom,
-    y: cam.oy + (0.5 * ry - KZ * (z - cam.pz)) * cam.zoom,
+    y: cam.oy + (tilt * ry - kz * (z - cam.pz)) * cam.zoom,
   }
 }
 
@@ -64,9 +73,11 @@ export interface VoxelTarget {
   u32: Uint32Array
   w: number
   h: number
-  /** Back-to-front voxel order, cached for the last rendered yaw. */
+  /** Back-to-front voxel order, cached for the last rendered camera pose. */
   order: Uint16Array
   orderYaw: number
+  orderTilt: number
+  orderKz: number
   orderModel: VoxelModel | null
   /** Shaded color per (palette index × 5 faces), rebuilt per frame. */
   lut: Uint32Array
@@ -90,6 +101,8 @@ export function createVoxelTarget(w: number, h: number): VoxelTarget {
     h,
     order: new Uint16Array(0),
     orderYaw: NaN,
+    orderTilt: NaN,
+    orderKz: NaN,
     orderModel: null,
     lut: new Uint32Array(0),
     rgb: new Uint8Array(0),
@@ -202,26 +215,39 @@ export function renderVoxels(
   const c = Math.cos(cam.yaw)
   const s = Math.sin(cam.yaw)
   const Z = cam.zoom
+  const tilt = cam.tilt ?? 0.5
+  const kz = cam.kz ?? KZ
   // Screen deltas for one voxel step along each model axis.
   const exx = c * Z
-  const exy = -0.5 * s * Z
+  const exy = -tilt * s * Z
   const eyx = s * Z
-  const eyy = 0.5 * c * Z
-  const ezy = -KZ * Z
+  const eyy = tilt * c * Z
+  const ezy = -kz * Z
 
-  // Painter order: key = 2·KZ·ry + z, ascending = back to front. Only
-  // recomputed when the yaw actually changes (pan/zoom reuse it).
-  if (t.orderModel !== model || t.orderYaw !== cam.yaw) {
+  // Painter order: key = (kz/tilt)·ry + z, ascending = back to front (at the
+  // default pose this is the old 2·KZ·ry + z). The sort tilt is clamped so a
+  // flat elevation (tilt → 0) keeps a stable depth order; at that pose only
+  // one side face is visible anyway, so cross-column overlap can't happen.
+  // Recomputed only when the camera pose actually changes (pan reuses it).
+  if (
+    t.orderModel !== model ||
+    t.orderYaw !== cam.yaw ||
+    t.orderTilt !== tilt ||
+    t.orderKz !== kz
+  ) {
     if (t.order.length !== model.count) t.order = new Uint16Array(model.count)
+    const depthScale = kz / Math.max(tilt, 0.05)
     const keys = new Float32Array(model.count)
     const idx: number[] = new Array(model.count)
     for (let i = 0; i < model.count; i++) {
-      keys[i] = (-model.xs[i] * s + model.ys[i] * c) * (2 * KZ) + model.zs[i]
+      keys[i] = (-model.xs[i] * s + model.ys[i] * c) * depthScale + model.zs[i]
       idx[i] = i
     }
     idx.sort((a, b) => keys[a] - keys[b])
     t.order.set(idx)
     t.orderYaw = cam.yaw
+    t.orderTilt = tilt
+    t.orderKz = kz
     t.orderModel = model
   }
 

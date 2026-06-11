@@ -11,6 +11,7 @@ import {
   exitInspect,
   snapInspect,
   updateInspect,
+  zoomInspect,
 } from "./inspect"
 import { VOYAGE_STOP_COUNT, type VoyageStatus } from "./progress"
 
@@ -57,6 +58,23 @@ export function useVoyageScene(
     const scene = createScene()
     scene.voyage = voyageRef.current
     snapStage(scene) // refreshes land directly at dock / sea / destination
+    if (import.meta.env.DEV) {
+      // Dev console hooks: inspect live state and fast-forward the sim
+      // deterministically (occluded tabs throttle rAF to ~1fps).
+      const w = window as unknown as {
+        __scene?: unknown
+        __tick?: (seconds: number) => void
+      }
+      w.__scene = scene
+      w.__tick = (seconds: number) => {
+        const steps = Math.ceil(seconds * 60)
+        for (let i = 0; i < steps; i++) {
+          updateScene(scene, 1 / 60)
+          updateInspect(scene, 1 / 60)
+        }
+        drawFrame(ctx, scene, sprites, dock)
+      }
+    }
 
     let lastInspecting = false
     const notifyInspect = () => {
@@ -204,6 +222,20 @@ export function useVoyageScene(
       dragging = false
     }
 
+    // Wheel-zoom the cutaway in integer voxel steps while holding it.
+    let wheelAccum = 0
+    const onWheel = (e: WheelEvent) => {
+      if (scene.mode !== "inspect" || scene.inspect?.phase !== "hold") return
+      e.preventDefault()
+      wheelAccum += e.deltaY
+      const NOTCH = 40
+      while (Math.abs(wheelAccum) >= NOTCH) {
+        const dir = wheelAccum > 0 ? -1 : 1 // scroll up = zoom in
+        wheelAccum -= Math.sign(wheelAccum) * NOTCH
+        if (zoomInspect(scene, dir) && reduced) stillFrameRef.current?.()
+      }
+    }
+
     const onCanvasHover = (e: MouseEvent) => {
       if (dragging) {
         canvas.style.cursor = "grabbing"
@@ -269,6 +301,7 @@ export function useVoyageScene(
     canvas.addEventListener("click", onClick)
     canvas.addEventListener("mousedown", onMouseDown)
     canvas.addEventListener("mousemove", onCanvasHover)
+    canvas.addEventListener("wheel", onWheel, { passive: false })
     window.addEventListener("mousemove", onMouseMove)
     window.addEventListener("mouseup", onMouseUp)
     window.addEventListener("keydown", onKeyDown)
@@ -284,6 +317,7 @@ export function useVoyageScene(
       canvas.removeEventListener("click", onClick)
       canvas.removeEventListener("mousedown", onMouseDown)
       canvas.removeEventListener("mousemove", onCanvasHover)
+      canvas.removeEventListener("wheel", onWheel)
       window.removeEventListener("mousemove", onMouseMove)
       window.removeEventListener("mouseup", onMouseUp)
       window.removeEventListener("keydown", onKeyDown)

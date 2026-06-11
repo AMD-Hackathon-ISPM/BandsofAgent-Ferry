@@ -45,7 +45,7 @@ const C = {
 }
 
 /** z of the top hull layer; the deck is its top face. */
-const HULL_TOP = 5
+export const HULL_TOP = 5
 
 /** Sprite/scene registration points, in model space. */
 export const FERRY_ANCHOR_3D = { x: 20, y: 6, z: HULL_TOP }
