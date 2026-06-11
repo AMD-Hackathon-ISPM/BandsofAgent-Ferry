@@ -20,7 +20,12 @@ import {
 
 /** The classic 2:1 iso heading the old sprite was authored at. */
 export const BAKED_YAW = Math.PI / 4
-export const BAKED_ZOOM = 4
+/**
+ * The model tripled in resolution (40→120 voxels long); 4/3 keeps the baked
+ * at-sea sprite the same screen footprint the 40-voxel ship had at zoom 4.
+ * The stamp rasterizer is geometric, so a fractional zoom is fine.
+ */
+export const BAKED_ZOOM = 4 / 3
 
 // Matches COLORS.outline / COLORS.shadow / F.foam in sprites.ts.
 const OUTLINE = "#0e1730"

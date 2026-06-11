@@ -18,7 +18,8 @@ const LABEL = "#c6d0e6"
 
 let accentCache: Map<string, string> | null = null
 
-function accentColor(varName: string): string {
+function accentColor(varName?: string): string {
+  if (!varName) return "#4f6bff"
   if (!accentCache) accentCache = new Map()
   const hit = accentCache.get(varName)
   if (hit) return hit

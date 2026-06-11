@@ -74,7 +74,7 @@ export interface VoxelTarget {
   w: number
   h: number
   /** Back-to-front voxel order, cached for the last rendered camera pose. */
-  order: Uint16Array
+  order: Uint32Array
   orderYaw: number
   orderTilt: number
   orderKz: number
@@ -99,7 +99,7 @@ export function createVoxelTarget(w: number, h: number): VoxelTarget {
     u32: new Uint32Array(img.data.buffer),
     w,
     h,
-    order: new Uint16Array(0),
+    order: new Uint32Array(0),
     orderYaw: NaN,
     orderTilt: NaN,
     orderKz: NaN,
@@ -235,7 +235,7 @@ export function renderVoxels(
     t.orderTilt !== tilt ||
     t.orderKz !== kz
   ) {
-    if (t.order.length !== model.count) t.order = new Uint16Array(model.count)
+    if (t.order.length !== model.count) t.order = new Uint32Array(model.count)
     const depthScale = kz / Math.max(tilt, 0.05)
     const keys = new Float32Array(model.count)
     const idx: number[] = new Array(model.count)
