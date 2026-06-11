@@ -3,9 +3,10 @@
 // (tone ramps + checkerboard dither) — nothing is lit at runtime, so drawing
 // a "shaded" sprite costs the same as a flat one.
 
-import { makeWaveTiles, makeWhitecaps } from "./sea"
+import { makeHorizonHaze, makeWaveTiles, makeWhitecaps, type WaveTiles } from "./sea"
 import { bakeFerrySprites, FERRY_GEOM } from "./voxel/bake"
 import { getFerryModel } from "./voxel/ferry-model"
+import { bakeBirdSprites, bakeCloudSprites } from "./voxel/sky-models"
 import type { VoxelModel } from "./voxel/voxel-grid"
 
 export const COLORS = {
@@ -57,50 +58,14 @@ export const FERRY_ANCHOR = FERRY_GEOM.anchor
 export const FERRY_STERN = FERRY_GEOM.stern
 
 // --- Hand-authored string sprites ------------------------------------------
-
-const CLOUD_PAL = { c: "#2c3a63", h: "#3b4c7d" }
-
-const CLOUD_A: SpriteDef = {
-  palette: CLOUD_PAL,
-  rows: [
-    "......hhhhh.......",
-    "...hhhccccchh.....",
-    ".hhcccccccccchh...",
-    "hccccccccccccccch.",
-    ".ccccccccccccccc..",
-    "...ccc..ccccc.....",
-  ],
-}
-
-const CLOUD_B: SpriteDef = {
-  palette: CLOUD_PAL,
-  rows: ["...hhhh.....", ".hhcccchh...", "hcccccccch..", "..ccc.cc...."],
-}
-
-const CLOUD_C: SpriteDef = {
-  palette: CLOUD_PAL,
-  rows: [
-    ".....hhhhhh........hh...",
-    "..hhhcccccchhh...hhcch..",
-    "hhcccccccccccchhhccccch.",
-    ".cccccccccccccccccccc...",
-    "...cccc..cccccc..ccc....",
-  ],
-}
-
-const BIRD_PAL = { b: "#8e9cbd" }
-
-const BIRD_FRAMES: SpriteDef[] = [
-  { palette: BIRD_PAL, rows: ["b...b", ".b.b.", "..b.."] },
-  { palette: BIRD_PAL, rows: [".....", "bb.bb", "..b.."] },
-]
+// (Clouds and birds are voxel models now — see voxel/sky-models.ts.)
 
 const FOAM_PAL = { f: "#dfe9fb", g: "#8fa3cf" }
 
 const FOAM_FRAMES: SpriteDef[] = [
-  { palette: FOAM_PAL, rows: [".ff.", "ffff", ".ff."] },
-  { palette: FOAM_PAL, rows: [".ff.", "f..f"] },
-  { palette: FOAM_PAL, rows: ["g.g", ".g."] },
+  { palette: FOAM_PAL, rows: [".ffff.", "ffffff", ".ffff."] },
+  { palette: FOAM_PAL, rows: [".fff.", "ff..ff", ".f..f."] },
+  { palette: FOAM_PAL, rows: ["g.g.g", ".g.g."] },
 ]
 
 const MOON: SpriteDef = {
@@ -175,7 +140,8 @@ export interface Sprites {
   birds: HTMLCanvasElement[]
   foam: HTMLCanvasElement[]
   moon: HTMLCanvasElement
-  waves: HTMLCanvasElement[][]
+  waves: WaveTiles
+  horizonHaze: HTMLCanvasElement
   whitecaps: HTMLCanvasElement[]
 }
 
@@ -185,11 +151,12 @@ export function bakeSprites(): Sprites {
     ferry: ferryBake.frames,
     ferryShadow: ferryBake.shadow,
     ferryModel: getFerryModel(),
-    clouds: [CLOUD_A, CLOUD_B, CLOUD_C].map(bakeSprite),
-    birds: BIRD_FRAMES.map(bakeSprite),
+    clouds: bakeCloudSprites(),
+    birds: bakeBirdSprites(),
     foam: FOAM_FRAMES.map(bakeSprite),
     moon: bakeSprite(MOON),
     waves: makeWaveTiles(),
+    horizonHaze: makeHorizonHaze(),
     whitecaps: makeWhitecaps(),
   }
 }

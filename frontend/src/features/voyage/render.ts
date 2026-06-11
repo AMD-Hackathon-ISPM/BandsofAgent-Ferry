@@ -34,15 +34,19 @@ function drawSeaScene(
 ) {
   const hy = horizonY(s.bufH)
 
-  // Sky, stars, moon, horizon.
+  // Sky, stars, moon.
   ctx.fillStyle = COLORS.sky
   ctx.fillRect(0, 0, s.bufW, hy + 1)
   drawStars(ctx, s.bufW, hy)
   ctx.drawImage(sprites.moon, Math.floor(s.bufW * 0.12), 6)
-  ctx.fillStyle = COLORS.horizon
-  ctx.fillRect(0, hy, s.bufW, 1)
 
   drawSea(ctx, s, sprites)
+
+  // Dithered atmosphere band instead of a hard horizon line.
+  const haze = sprites.horizonHaze
+  for (let x = 0; x < s.bufW; x += haze.width) {
+    ctx.drawImage(haze, x, hy - 2)
+  }
 
   drawDestination(ctx, s, dock)
 
@@ -82,8 +86,10 @@ function drawSeaScene(
   }
   if (s.bird) {
     const by = s.bird.baseY + Math.sin(s.t * 2 + s.bird.phase) * 2
+    // Up–level–down–level flap cycle over the three baked frames.
+    const flap = [0, 1, 2, 1][Math.floor(s.t * 6) % 4]
     ctx.drawImage(
-      sprites.birds[Math.floor(s.t * 4) % 2],
+      sprites.birds[flap],
       Math.floor(s.bird.x),
       Math.floor(by)
     )
