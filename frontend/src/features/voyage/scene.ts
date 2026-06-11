@@ -3,7 +3,7 @@
 
 import { SEA_VX, SEA_VY, horizonY } from "./sea"
 import { FERRY_ANCHOR, FERRY_STERN } from "./sprites"
-import type { VoyageStatus } from "./progress"
+import { VOYAGE_STOP_COUNT, type VoyageStatus } from "./progress"
 
 /** "zooming" / "interior" are reserved for the click-into-the-ship mode. */
 export type SceneMode = "sea" | "zooming" | "interior"
@@ -42,7 +42,9 @@ export interface SceneState {
   birdTimer: number
   /** Ship blit rect in art px, refreshed by render; used for click hit-tests. */
   shipRect: { x: number; y: number; w: number; h: number }
+  harborRects: Array<{ index: number; x: number; y: number; w: number; h: number }>
   onShipClick?: () => void
+  onHarborClick?: (index: number) => void
 }
 
 const MAX_WAKE = 80
@@ -65,7 +67,14 @@ export function createScene(): SceneState {
     scrollY: 0,
     progress: 0,
     speed: 0.5,
-    voyage: { target: 0, mode: "pending" },
+    voyage: {
+      target: 0,
+      mode: "pending",
+      stop: 0,
+      harborStates: Array.from({ length: VOYAGE_STOP_COUNT }, (_, index) =>
+        index === 0 ? "active" : "upcoming"
+      ),
+    },
     wake: [],
     wakeTimer: 0,
     clouds: [
@@ -76,14 +85,18 @@ export function createScene(): SceneState {
     bird: null,
     birdTimer: 12,
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
+    harborRects: [],
   }
 }
 
 /** Top-left blit position keeping the ferry centered (a touch below middle). */
 export function shipBlitPos(s: SceneState): { x: number; y: number } {
+  const underway = s.voyage.mode === "sailing" ? 1 : 0
+  const surge = Math.round(Math.sin(s.t * 0.9) * 2 * underway)
+  const heave = Math.round(Math.sin(s.t * 0.7) * underway)
   return {
-    x: Math.floor(s.bufW * 0.5 - FERRY_ANCHOR.x),
-    y: Math.floor(s.bufH * 0.55 - FERRY_ANCHOR.y),
+    x: Math.floor(s.bufW * 0.5 - FERRY_ANCHOR.x + surge),
+    y: Math.floor(s.bufH * 0.55 - FERRY_ANCHOR.y + heave),
   }
 }
 

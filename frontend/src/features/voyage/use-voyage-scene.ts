@@ -4,7 +4,7 @@ import { usePrefersReducedMotion } from "@/lib/hooks"
 import { bakeSprites } from "./sprites"
 import { createScene, updateScene } from "./scene"
 import { drawFrame } from "./render"
-import type { VoyageStatus } from "./progress"
+import { VOYAGE_STOP_COUNT, type VoyageStatus } from "./progress"
 
 /** Art pixels are this many CSS px wide (snapped to the device-pixel grid). */
 const PIXEL_SCALE = 3
@@ -16,7 +16,10 @@ const PIXEL_SCALE = 3
  * mount→cleanup→remount is safe by construction. Scene data lives in refs —
  * no React re-renders per frame.
  */
-export function useVoyageScene(voyage: VoyageStatus): {
+export function useVoyageScene(
+  voyage: VoyageStatus,
+  options: { onHarborClick?: (index: number) => void } = {}
+): {
   wrapRef: React.RefObject<HTMLDivElement | null>
   canvasRef: React.RefObject<HTMLCanvasElement | null>
 } {
@@ -24,7 +27,12 @@ export function useVoyageScene(voyage: VoyageStatus): {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const reduced = usePrefersReducedMotion()
   const voyageRef = React.useRef(voyage)
+  const onHarborClickRef = React.useRef(options.onHarborClick)
   const stillFrameRef = React.useRef<(() => void) | null>(null)
+
+  React.useEffect(() => {
+    onHarborClickRef.current = options.onHarborClick
+  }, [options.onHarborClick])
 
   React.useEffect(() => {
     const wrap = wrapRef.current
@@ -36,8 +44,15 @@ export function useVoyageScene(voyage: VoyageStatus): {
     const sprites = bakeSprites()
     const scene = createScene()
     scene.voyage = voyageRef.current
-    // Land on the current progress instead of replaying the whole voyage.
-    scene.progress = voyageRef.current.target
+    scene.onHarborClick = (index) => onHarborClickRef.current?.(index)
+    // Start active runs one harbor behind so refreshes still show travel.
+    scene.progress =
+      voyageRef.current.mode === "sailing"
+        ? Math.max(
+            0,
+            voyageRef.current.target - 1 / Math.max(1, VOYAGE_STOP_COUNT - 1)
+          )
+        : voyageRef.current.target
 
     let raf = 0
     let running = false
@@ -96,6 +111,13 @@ export function useVoyageScene(voyage: VoyageStatus): {
       if (rect.width === 0 || scene.bufW === 0) return
       const ax = ((e.clientX - rect.left) / rect.width) * scene.bufW
       const ay = ((e.clientY - rect.top) / rect.height) * scene.bufH
+      for (let i = scene.harborRects.length - 1; i >= 0; i--) {
+        const h = scene.harborRects[i]
+        if (ax >= h.x && ax < h.x + h.w && ay >= h.y && ay < h.y + h.h) {
+          scene.onHarborClick?.(h.index)
+          return
+        }
+      }
       const r = scene.shipRect
       if (ax >= r.x && ax < r.x + r.w && ay >= r.y && ay < r.y + r.h) {
         scene.onShipClick?.()

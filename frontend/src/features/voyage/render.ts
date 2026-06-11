@@ -5,6 +5,7 @@
 import { drawSea, hash2, horizonY } from "./sea"
 import { shipBlitPos, type SceneState } from "./scene"
 import { COLORS, type Sprites } from "./sprites"
+import type { HarborState } from "./progress"
 
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
@@ -26,15 +27,7 @@ export function drawFrame(
 
   drawSea(ctx, s, sprites)
 
-  // Destination harbor slides in along the horizon late in the voyage,
-  // settling right of the ship where the floating panels don't cover it.
-  const appear = Math.min(1, Math.max(0, (s.progress - 0.72) / 0.28))
-  if (appear > 0) {
-    const hb = sprites.harbor
-    const rest = Math.floor(s.bufW * 0.66 - hb.width / 2)
-    const hx = Math.floor(s.bufW - appear * (s.bufW - rest))
-    ctx.drawImage(hb, hx, hy - hb.height + 3)
-  }
+  drawAgentHarbors(ctx, s, sprites, hy)
 
   // Wake foam, oldest faintest.
   for (const p of s.wake) {
@@ -65,6 +58,173 @@ export function drawFrame(
       Math.floor(by)
     )
   }
+}
+
+function drawAgentHarbors(
+  ctx: CanvasRenderingContext2D,
+  s: SceneState,
+  sprites: Sprites,
+  hy: number
+) {
+  const count = sprites.harbors.length
+  const route = s.progress * Math.max(1, count - 1)
+  const baseX = s.bufW * 0.56
+  const baseY = Math.max(hy + 24, s.bufH * 0.36)
+  const stepX = Math.max(62, Math.min(108, s.bufW * 0.18))
+  const stepY = Math.max(30, Math.min(56, s.bufH * 0.09))
+  const placed: Array<{
+    index: number
+    x: number
+    y: number
+    w: number
+    h: number
+    state: HarborState
+    alpha: number
+  }> = []
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 0, s.bufW, s.bufH - 12)
+  ctx.clip()
+
+  for (let i = 0; i < count; i++) {
+    const rel = i - route
+    if (rel < -2.3 || rel > 3.2) continue
+
+    const hb = sprites.harbors[i]
+    const distance = Math.abs(rel)
+    const state = s.voyage.harborStates[i] ?? "upcoming"
+    const scale = Math.max(
+      0.68,
+      Math.min(1.08, 1 - Math.max(0, rel) * 0.1 - Math.min(0, rel) * 0.03)
+    )
+    const w = Math.floor(hb.width * scale)
+    const h = Math.floor(hb.height * scale)
+    const x = Math.floor(baseX + rel * stepX - w / 2)
+    const y = Math.floor(baseY - rel * stepY + distance * 2 - h / 2)
+    const alpha =
+      state === "upcoming"
+        ? Math.max(0.24, 0.45 - distance * 0.04)
+        : state === "skipped"
+          ? 0.48
+          : Math.max(0.56, 1 - distance * 0.14)
+
+    placed.push({ index: i, x, y, w, h, state, alpha })
+  }
+
+  s.harborRects = placed.map((p) => ({
+    index: p.index,
+    x: p.x,
+    y: p.y,
+    w: p.w,
+    h: p.h,
+  }))
+
+  ctx.globalAlpha = 0.32
+  for (let i = 0; i < placed.length - 1; i++) {
+    const a = placed[i]
+    const b = placed[i + 1]
+    drawRouteSegment(ctx, a.x + a.w / 2, a.y + a.h - 5, b.x + b.w / 2, b.y + b.h - 5)
+  }
+  ctx.globalAlpha = 1
+
+  for (const harbor of placed.sort((a, b) => a.y + a.h - (b.y + b.h))) {
+    const hb = sprites.harbors[harbor.index]
+
+    ctx.globalAlpha = harbor.alpha
+    ctx.drawImage(hb, harbor.x, harbor.y, harbor.w, harbor.h)
+
+    // Small reflection strokes connect each harbor to the water without
+    // turning the scene into a foreground boardwalk.
+    ctx.globalAlpha = harbor.alpha * 0.42
+    const ry = harbor.y + harbor.h - 2
+    ctx.fillStyle = harbor.state === "active" ? "#dfe9fb" : COLORS.horizon
+    ctx.fillRect(harbor.x + Math.floor(harbor.w * 0.22), ry, Math.floor(harbor.w * 0.18), 1)
+    ctx.fillRect(
+      harbor.x + Math.floor(harbor.w * 0.56),
+      ry + 3,
+      Math.floor(harbor.w * 0.24),
+      1
+    )
+
+    if (harbor.state === "active") {
+      const pulse = 0.55 + Math.sin(s.t * 4) * 0.35
+      ctx.globalAlpha = Math.max(0.25, pulse)
+      ctx.fillStyle = "#ffd166"
+      ctx.fillRect(harbor.x + harbor.w - 24, harbor.y + 15, 2, 2)
+      ctx.fillRect(harbor.x + harbor.w - 25, harbor.y + 16, 4, 1)
+      ctx.fillStyle = "#f4f7fd"
+      ctx.fillRect(harbor.x + harbor.w - 23, harbor.y + 14, 1, 1)
+    }
+    drawHarborMarker(ctx, harbor)
+  }
+
+  ctx.restore()
+  ctx.globalAlpha = 1
+}
+
+function drawRouteSegment(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+) {
+  const steps = 7
+  ctx.fillStyle = "#5d76a8"
+  for (let i = 1; i < steps; i += 2) {
+    const x = Math.floor(x1 + ((x2 - x1) * i) / steps)
+    const y = Math.floor(y1 + ((y2 - y1) * i) / steps)
+    ctx.fillRect(x, y, 5, 1)
+  }
+}
+
+function drawHarborMarker(
+  ctx: CanvasRenderingContext2D,
+  harbor: {
+    x: number
+    y: number
+    w: number
+    state: HarborState
+    alpha: number
+  }
+) {
+  const cx = Math.floor(harbor.x + harbor.w / 2)
+  const y = harbor.y - 10
+  if (harbor.state === "upcoming") return
+
+  ctx.globalAlpha = harbor.state === "skipped" ? 0.72 : 0.95
+  ctx.fillStyle =
+    harbor.state === "failed"
+      ? "#ef4444"
+      : harbor.state === "blocked"
+        ? "#f59e0b"
+        : harbor.state === "active"
+          ? "#ffd166"
+          : harbor.state === "skipped"
+            ? "#8fa3cf"
+            : "#52d273"
+  ctx.fillRect(cx - 5, y, 10, 8)
+  ctx.fillStyle = "#111a33"
+
+  if (harbor.state === "done" || harbor.state === "active") {
+    ctx.fillRect(cx - 3, y + 4, 2, 2)
+    ctx.fillRect(cx - 1, y + 5, 2, 2)
+    ctx.fillRect(cx + 1, y + 3, 2, 2)
+    ctx.fillRect(cx + 3, y + 1, 2, 2)
+  } else if (harbor.state === "failed") {
+    ctx.fillRect(cx - 3, y + 2, 2, 2)
+    ctx.fillRect(cx - 1, y + 4, 2, 2)
+    ctx.fillRect(cx + 1, y + 2, 2, 2)
+    ctx.fillRect(cx - 3, y + 6, 2, 1)
+    ctx.fillRect(cx + 2, y + 6, 2, 1)
+  } else if (harbor.state === "blocked") {
+    ctx.fillRect(cx - 1, y + 1, 2, 4)
+    ctx.fillRect(cx - 1, y + 6, 2, 1)
+  } else {
+    ctx.fillRect(cx - 3, y + 3, 6, 2)
+  }
+  ctx.globalAlpha = 1
 }
 
 function drawStars(ctx: CanvasRenderingContext2D, w: number, hy: number) {

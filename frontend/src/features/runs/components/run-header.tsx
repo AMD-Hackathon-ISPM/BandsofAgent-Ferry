@@ -8,6 +8,8 @@ import {
   IconClock,
   IconGitBranch,
   IconGitCommit,
+  IconHourglass,
+  IconInfoCircle,
   IconPlayerPlay,
   IconRefresh,
 } from "@tabler/icons-react"
@@ -39,6 +41,45 @@ function RunningDots() {
   )
 }
 
+function QueueInfoButton({ run }: { run: Run }) {
+  if (
+    run.status !== "pending" &&
+    run.status !== "planning" &&
+    run.status !== "analyzing" &&
+    run.status !== "translating" &&
+    run.status !== "db_migration" &&
+    run.status !== "testing" &&
+    run.status !== "reviewing" &&
+    run.status !== "generating_pr"
+  ) {
+    return null
+  }
+
+  const queued = run.status === "pending"
+  return (
+    <Button
+      size="icon-sm"
+      variant="outline"
+      className={cn(
+        "shrink-0",
+        queued
+          ? "border-primary/35 bg-primary/10 text-primary hover:bg-primary/15"
+          : "border-warning/35 bg-warning/10 text-warning hover:bg-warning/15"
+      )}
+      aria-label={queued ? "Queue information" : "Run dispatch information"}
+      onClick={() =>
+        toast(queued ? "Run is queued" : "Run is dispatched", {
+          description: queued
+            ? "Ferry will send this run to the band as soon as capacity is available."
+            : "This run has left the queue. The voyage advances as each agent posts work.",
+        })
+      }
+    >
+      {queued ? <IconHourglass /> : <IconInfoCircle />}
+    </Button>
+  )
+}
+
 function RunActionButton({ run, role }: { run: Run; role: Role }) {
   const { accessToken } = useAuth()
   const navigate = useNavigate()
@@ -58,8 +99,9 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   const startMutation = useMutation({
     mutationFn: () => startRun(accessToken ?? "", run.id),
     onSuccess: () => {
-      toast.success("Run started", {
-        description: "Agents are assembling for this migration.",
+      toast.success("Run queued", {
+        description:
+          "Ferry will dispatch the band when capacity is available. Use the queue info button for status context.",
       })
       queryClient.invalidateQueries({ queryKey: ["run", run.id] })
     },
@@ -69,8 +111,8 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   const rerunMutation = useMutation({
     mutationFn: () => rerunRun(accessToken ?? "", run.id),
     onSuccess: (result) => {
-      toast.success("Run restarted", {
-        description: `Run #${result.runNumber} created.`,
+      toast.success("New voyage session created", {
+        description: `Run #${result.runNumber} starts as a separate rerun.`,
       })
       queryClient.invalidateQueries({ queryKey: ["recent-runs"] })
       navigate(`/runs/${result.id}`)
@@ -173,53 +215,68 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
 
   if (live) {
     return (
-      <Button
-        size="sm"
-        disabled={cancelMutation.isPending}
-        className={cn(
-          ACTION_BUTTON_CLASS,
-          isStopPending
-            ? "border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20"
-            : "border-warning/45 bg-warning/15 text-warning hover:bg-warning/20"
-        )}
-        onClick={requestStopRun}
-      >
-        {isStopPending ? (
-          <>
-            <span
-              className="dot-pulse size-2 rounded-[2px] bg-destructive"
-              aria-hidden="true"
-            />
-            Stopping
-            <RunningDots />
-          </>
-        ) : (
-          <>
-            <span
-              className="dot-pulse size-2 rounded-[2px] bg-warning"
-              aria-hidden="true"
-            />
-            Running
-            <RunningDots />
-          </>
-        )}
-      </Button>
+      <>
+        <QueueInfoButton run={run} />
+        <Button
+          size="sm"
+          disabled={cancelMutation.isPending}
+          className={cn(
+            ACTION_BUTTON_CLASS,
+            isStopPending
+              ? "border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20"
+              : "border-warning/45 bg-warning/15 text-warning hover:bg-warning/20"
+          )}
+          onClick={requestStopRun}
+        >
+          {isStopPending ? (
+            <>
+              <span
+                className="dot-pulse size-2 rounded-[2px] bg-destructive"
+                aria-hidden="true"
+              />
+              Stopping
+              <RunningDots />
+            </>
+          ) : (
+            <>
+              <span
+                className="dot-pulse size-2 rounded-[2px] bg-warning"
+                aria-hidden="true"
+              />
+              Running
+              <RunningDots />
+            </>
+          )}
+        </Button>
+      </>
     )
   }
 
   return (
-    <Button
-      size="sm"
-      disabled={startMutation.isPending}
-      className={cn(
-        ACTION_BUTTON_CLASS,
-        "border-primary/45 bg-primary text-primary-foreground hover:bg-primary/85"
-      )}
-      onClick={() => startMutation.mutate()}
-    >
-      <IconPlayerPlay data-icon="inline-start" />
-      Run
-    </Button>
+    <>
+      <QueueInfoButton run={run} />
+      <Button
+        size="sm"
+        disabled={startMutation.isPending}
+        className={cn(
+          ACTION_BUTTON_CLASS,
+          "border-primary/45 bg-primary text-primary-foreground hover:bg-primary/85"
+        )}
+        onClick={() => startMutation.mutate()}
+      >
+        {startMutation.isPending ? (
+          <>
+            <IconHourglass data-icon="inline-start" />
+            Queueing
+          </>
+        ) : (
+          <>
+            <IconPlayerPlay data-icon="inline-start" />
+            Run
+          </>
+        )}
+      </Button>
+    </>
   )
 }
 
