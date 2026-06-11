@@ -20,6 +20,8 @@ export interface VoyageStatus {
   mode: VoyageMode
   /** Current agent stop, 0..8 — still drives pacing and labels. */
   stop: number
+  /** A pull request exists for the run (lights the destination beacon). */
+  prReady: boolean
 }
 
 export const VOYAGE_STOP_COUNT = AGENT_ORDER.length
@@ -93,11 +95,12 @@ function latestReworkSignal(run: Run) {
   })
 }
 
-function status(stop: number, mode: VoyageMode): VoyageStatus {
+function status(stop: number, mode: VoyageMode, prReady: boolean): VoyageStatus {
   return {
     target: stopTarget(stop),
     mode,
     stop,
+    prReady,
   }
 }
 
@@ -107,12 +110,13 @@ export function deriveVoyage(run: Run): VoyageStatus {
     ? agentIndex.get(reworkSignal.targetAgent ?? "code_generator") ??
       STATUS_STOP.needs_rework
     : deriveStop(run)
-  if (run.status === "completed") return status(8, "arrived")
-  if (run.status === "pending") return status(stop, "pending")
+  const prReady = run.pr != null
+  if (run.status === "completed") return status(8, "arrived", prReady)
+  if (run.status === "pending") return status(stop, "pending", prReady)
 
-  if (run.status === "failed") return status(stop, "failed")
+  if (run.status === "failed") return status(stop, "failed", prReady)
   if (run.status === "blocked" || run.status === "needs_rework") {
-    return status(stop, "blocked")
+    return status(stop, "blocked", prReady)
   }
-  return status(stop, "sailing")
+  return status(stop, "sailing", prReady)
 }

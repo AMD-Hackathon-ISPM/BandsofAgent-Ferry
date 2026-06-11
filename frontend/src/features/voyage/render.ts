@@ -6,23 +6,31 @@ import { drawSea, hash2, horizonY } from "./sea"
 import { shipBlitPos, shipBobOffset, type SceneState } from "./scene"
 import { COLORS, type Sprites } from "./sprites"
 import { drawInspect } from "./inspect"
+import {
+  drawDestination,
+  drawDockBack,
+  drawDockFront,
+  type DockSprites,
+} from "./dock"
 
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
   s: SceneState,
-  sprites: Sprites
+  sprites: Sprites,
+  dock: DockSprites
 ) {
   if (s.bufW <= 0 || s.bufH <= 0) return
   // The sea keeps living behind the inspection view, just dimmed — only the
   // ship itself is lifted out and drawn live by the voxel renderer on top.
-  drawSeaScene(ctx, s, sprites)
+  drawSeaScene(ctx, s, sprites, dock)
   if (s.mode === "inspect") drawInspect(ctx, s, sprites)
 }
 
 function drawSeaScene(
   ctx: CanvasRenderingContext2D,
   s: SceneState,
-  sprites: Sprites
+  sprites: Sprites,
+  dock: DockSprites
 ) {
   const hy = horizonY(s.bufH)
 
@@ -35,6 +43,11 @@ function drawSeaScene(
   ctx.fillRect(0, hy, s.bufW, 1)
 
   drawSea(ctx, s, sprites)
+
+  drawDestination(ctx, s, dock)
+
+  const atDock = s.stage === "dock" || s.stage === "depart"
+  if (atDock) drawDockBack(ctx, s, dock)
 
   // Wake foam, oldest faintest.
   for (const p of s.wake) {
@@ -60,6 +73,8 @@ function drawSeaScene(
       ctx.globalAlpha = 1
     }
   }
+
+  if (atDock && s.mode === "sea") drawDockFront(ctx, s, dock)
 
   // Sky dressing above everything in its band.
   for (const c of s.clouds) {

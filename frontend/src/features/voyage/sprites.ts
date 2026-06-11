@@ -122,36 +122,6 @@ const MOON: SpriteDef = {
   ],
 }
 
-// Distant harbor skyline: lighthouse, cranes, warehouses; warm windows.
-const HARBOR: SpriteDef = {
-  palette: {
-    S: "#233158",
-    s: "#2c3d6b",
-    Q: "#1b2747",
-    W: "#f2c14e",
-    B: "#ffd166",
-    i: "#4f6bff",
-  },
-  rows: [
-    "....B.......................................",
-    "...sss......................................",
-    "...sWs........................s.............",
-    "...sss........................s.............",
-    "....S.........ssssssss........s.............",
-    "....S................s......sssss...........",
-    "...SSS...............s......ssiss....ssssss.",
-    "...SSS...............s......sssss....s.W..s.",
-    "...SSS.....SS........s.....sssssss...s....s.",
-    "..SSSSS....SS....ssssssss..sssssss...sW...s.",
-    "..SSSSS....SS....s..s......sSWSsss...s..W.s.",
-    ".SSSSSSS...SS....s..s......sssssss...ssssss.",
-    ".SSSSSSS...SSSSSSSSSSS..SSSSSSSSSS..SSSSSSS.",
-    ".SSWSSSS...SSSSSSSSSSS..SW.SSW.SSS..SS.W.SS.",
-    "QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
-    "QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
-  ],
-}
-
 // --- Pixel-art drawing helpers (shared with the dock scene) -----------------
 
 export function makeArtCanvas(
@@ -205,7 +175,6 @@ export interface Sprites {
   birds: HTMLCanvasElement[]
   foam: HTMLCanvasElement[]
   moon: HTMLCanvasElement
-  harbor: HTMLCanvasElement
   waves: HTMLCanvasElement[][]
   whitecaps: HTMLCanvasElement[]
 }
@@ -220,7 +189,6 @@ export function bakeSprites(): Sprites {
     birds: BIRD_FRAMES.map(bakeSprite),
     foam: FOAM_FRAMES.map(bakeSprite),
     moon: bakeSprite(MOON),
-    harbor: bakeSprite(HARBOR),
     waves: makeWaveTiles(),
     whitecaps: makeWhitecaps(),
   }

@@ -9,6 +9,13 @@ import type { InspectState } from "./inspect"
 /** "inspect" is the prop-inspection mode entered by clicking the ship. */
 export type SceneMode = "sea" | "inspect"
 
+/**
+ * Where the voyage physically is: berthed at the loading dock, pulling out,
+ * on open water, approaching the destination harbor, or moored at it. Driven
+ * by the run status (voyage.mode) — the stage adds the spatial transitions.
+ */
+export type VoyageStage = "dock" | "depart" | "sea" | "arrive" | "docked"
+
 export interface Particle {
   x: number
   y: number
@@ -26,6 +33,19 @@ export interface CloudInst {
 
 export interface SceneState {
   mode: SceneMode
+  stage: VoyageStage
+  /** Seconds in the current stage. */
+  stageT: number
+  /** Departure-dock world offset, art px; 0 = berthed, drifts left on depart. */
+  dockX: number
+  /** Crane/cargo animation clock, runs while at the loading dock. */
+  craneT: number
+  /** 0..1 destination-harbor approach (1 = moored alongside). */
+  arrival: number
+  /** Eased ship x as a fraction of the buffer width. */
+  shipXFrac: number
+  /** Stern loading door, 0 open .. 1 sealed. */
+  doorT: number
   t: number
   bufW: number
   bufH: number
@@ -53,16 +73,41 @@ export interface SceneState {
 const MAX_WAKE = 120
 
 const SPEED_TARGET: Record<VoyageStatus["mode"], number> = {
-  pending: 0.35,
+  pending: 0.05,
   sailing: 1,
   arrived: 0.15,
   failed: 0.1,
   blocked: 0.3,
 }
 
+/** Ship x-fraction while berthed (dock on the left, bow already pointed out). */
+const BERTH_X = 0.62
+/** Ship x-fraction on open water. */
+const SEA_X = 0.5
+const DOOR_DUR = 1.2
+const DEPART_DUR = 4.5
+const ARRIVE_DUR = 4
+/** How far the departure dock scrolls before it is fully off-screen. */
+const DOCK_TRAVEL = 420
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
 export function createScene(): SceneState {
   return {
     mode: "sea",
+    stage: "sea",
+    stageT: 0,
+    dockX: 0,
+    craneT: 0,
+    arrival: 0,
+    shipXFrac: SEA_X,
+    doorT: 1,
     t: 0,
     bufW: 0,
     bufH: 0,
@@ -74,6 +119,7 @@ export function createScene(): SceneState {
       target: 0,
       mode: "pending",
       stop: 0,
+      prReady: false,
     },
     wake: [],
     wakeTimer: 0,
@@ -90,13 +136,87 @@ export function createScene(): SceneState {
   }
 }
 
+/**
+ * Snap the spatial stage to whatever the run status implies, with no
+ * transition animation. Used on mount and for reduced-motion still frames so
+ * a refresh lands directly in the right scene.
+ */
+export function snapStage(s: SceneState) {
+  switch (s.voyage.mode) {
+    case "pending":
+      s.stage = "dock"
+      s.shipXFrac = BERTH_X
+      s.dockX = 0
+      s.doorT = 0
+      s.arrival = 0
+      s.speed = 0
+      break
+    case "arrived":
+      s.stage = "docked"
+      s.shipXFrac = SEA_X
+      s.doorT = 1
+      s.arrival = 1
+      s.speed = 0
+      break
+    default:
+      s.stage = "sea"
+      s.shipXFrac = SEA_X
+      s.doorT = 1
+      s.arrival = 0
+      break
+  }
+  s.stageT = 0
+}
+
+function setStage(s: SceneState, stage: VoyageStage) {
+  s.stage = stage
+  s.stageT = 0
+}
+
+function updateStage(s: SceneState, dt: number) {
+  s.stageT += dt
+  const mode = s.voyage.mode
+
+  switch (s.stage) {
+    case "dock":
+      s.craneT += dt
+      s.shipXFrac = BERTH_X
+      s.dockX = 0
+      s.doorT = 0
+      if (mode === "arrived") snapStage(s)
+      else if (mode !== "pending") setStage(s, "depart")
+      break
+    case "depart": {
+      // The stern door seals first, then the ferry pulls out and the dock
+      // scrolls away behind it.
+      s.doorT = clamp01(s.stageT / DOOR_DUR)
+      const p = easeInOutCubic(clamp01((s.stageT - 0.8) / (DEPART_DUR - 0.8)))
+      s.shipXFrac = BERTH_X + (SEA_X - BERTH_X) * p
+      s.dockX = -DOCK_TRAVEL * p
+      if (s.stageT >= DEPART_DUR) setStage(s, "sea")
+      break
+    }
+    case "sea":
+      if (mode === "arrived") setStage(s, "arrive")
+      else if (mode === "pending") snapStage(s)
+      break
+    case "arrive":
+      if (s.stageT >= ARRIVE_DUR) setStage(s, "docked")
+      break
+    case "docked":
+      if (mode === "sailing") snapStage(s)
+      else if (mode === "pending") snapStage(s)
+      break
+  }
+}
+
 /** Top-left blit position keeping the ferry centered (a touch below middle). */
 export function shipBlitPos(s: SceneState): { x: number; y: number } {
   const underway = s.voyage.mode === "sailing" ? 1 : 0
   const surge = Math.round(Math.sin(s.t * 0.9) * 2 * underway)
   const heave = Math.round(Math.sin(s.t * 0.7) * underway)
   return {
-    x: Math.floor(s.bufW * 0.5 - FERRY_ANCHOR.x + surge),
+    x: Math.floor(s.bufW * s.shipXFrac - FERRY_ANCHOR.x + surge),
     y: Math.floor(s.bufH * 0.55 - FERRY_ANCHOR.y + heave),
   }
 }
@@ -109,10 +229,24 @@ export function shipBobOffset(s: SceneState): number {
 
 export function updateScene(s: SceneState, dt: number) {
   s.t += dt
+  updateStage(s, dt)
 
   const ease = Math.min(1, dt * 0.8)
   s.progress += (s.voyage.target - s.progress) * ease
-  s.speed += (SPEED_TARGET[s.voyage.mode] - s.speed) * Math.min(1, dt * 1.5)
+  let speedTarget = SPEED_TARGET[s.voyage.mode]
+  if (s.stage === "dock" || s.stage === "docked") speedTarget = 0
+  else if (s.stage === "arrive") speedTarget = 0.1
+  s.speed += (speedTarget - s.speed) * Math.min(1, dt * 1.5)
+
+  // Destination harbor: peeks over the horizon late in the voyage, then
+  // closes alongside during the arrive stage.
+  const arrivalTarget =
+    s.stage === "arrive" || s.stage === "docked"
+      ? 1
+      : s.stage === "sea" && s.voyage.mode === "sailing" && s.progress > 0.9
+        ? Math.min(0.5, (s.progress - 0.9) * 5)
+        : 0
+  s.arrival += (arrivalTarget - s.arrival) * Math.min(1, dt * 0.9)
 
   // Water drifts down-left, opposite the bow heading (up-right).
   s.scrollX += SEA_VX * s.speed * dt

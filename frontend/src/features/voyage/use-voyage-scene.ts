@@ -2,7 +2,8 @@ import * as React from "react"
 
 import { usePrefersReducedMotion } from "@/lib/hooks"
 import { bakeSprites } from "./sprites"
-import { createScene, updateScene } from "./scene"
+import { bakeDockSprites } from "./dock"
+import { createScene, snapStage, updateScene } from "./scene"
 import { drawFrame } from "./render"
 import {
   clampPan,
@@ -52,8 +53,10 @@ export function useVoyageScene(
     if (!ctx) return
 
     const sprites = bakeSprites()
+    const dock = bakeDockSprites()
     const scene = createScene()
     scene.voyage = voyageRef.current
+    snapStage(scene) // refreshes land directly at dock / sea / destination
 
     let lastInspecting = false
     const notifyInspect = () => {
@@ -114,7 +117,7 @@ export function useVoyageScene(
       ctx.imageSmoothingEnabled = false
       scene.bufW = bw
       scene.bufH = bh
-      drawFrame(ctx, scene, sprites)
+      drawFrame(ctx, scene, sprites, dock)
     }
 
     const frame = (ts: number) => {
@@ -125,7 +128,7 @@ export function useVoyageScene(
       updateScene(scene, dt)
       updateInspect(scene, dt)
       notifyInspect()
-      drawFrame(ctx, scene, sprites)
+      drawFrame(ctx, scene, sprites, dock)
     }
     const start = () => {
       if (running) return
@@ -254,8 +257,9 @@ export function useVoyageScene(
     stillFrameRef.current = () => {
       scene.voyage = voyageRef.current
       scene.progress = voyageRef.current.target
+      snapStage(scene) // no animation loop to play transitions — jump there
       updateScene(scene, 0)
-      drawFrame(ctx, scene, sprites)
+      drawFrame(ctx, scene, sprites, dock)
     }
 
     const ro = new ResizeObserver(resize)
