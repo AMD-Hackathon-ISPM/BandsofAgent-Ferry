@@ -48,11 +48,13 @@ export function VoyageView(props: {
   } = props
   const voyage = deriveVoyage(run)
   const [selectedHarbor, setSelectedHarbor] = React.useState<number | null>(null)
+  const [inspecting, setInspecting] = React.useState(false)
   const { wrapRef, canvasRef } = useVoyageScene(voyage, {
     onHarborClick: (index) => {
       setSelectedHarbor(index)
       props.onSelectAgent?.(AGENT_ORDER[index])
     },
+    onInspectChange: setInspecting,
   })
 
   return (
@@ -65,6 +67,16 @@ export function VoyageView(props: {
         className="absolute inset-0 overflow-hidden bg-[#111a33]"
       >
         <canvas ref={canvasRef} className="pixel-canvas block" />
+      </div>
+
+      <div
+        aria-hidden={!inspecting}
+        className={cn(
+          "pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm transition-opacity duration-300",
+          inspecting ? "opacity-100" : "opacity-0"
+        )}
+      >
+        Drag or arrow keys to pan — Esc to return
       </div>
 
       {showLog && (

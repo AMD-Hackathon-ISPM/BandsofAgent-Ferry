@@ -4,9 +4,10 @@
 import { SEA_VX, SEA_VY, horizonY } from "./sea"
 import { FERRY_ANCHOR, FERRY_STERN } from "./sprites"
 import { VOYAGE_STOP_COUNT, type VoyageStatus } from "./progress"
+import type { InspectState } from "./inspect"
 
-/** "zooming" / "interior" are reserved for the click-into-the-ship mode. */
-export type SceneMode = "sea" | "zooming" | "interior"
+/** "inspect" is the prop-inspection mode entered by clicking the ship. */
+export type SceneMode = "sea" | "inspect"
 
 export interface Particle {
   x: number
@@ -43,6 +44,10 @@ export interface SceneState {
   /** Ship blit rect in art px, refreshed by render; used for click hit-tests. */
   shipRect: { x: number; y: number; w: number; h: number }
   harborRects: Array<{ index: number; x: number; y: number; w: number; h: number }>
+  /** Live prop-inspection state while mode === "inspect". */
+  inspect: InspectState | null
+  /** Currently held pan keys (arrows), maintained by the canvas hook. */
+  keys: Set<string>
   onShipClick?: () => void
   onHarborClick?: (index: number) => void
 }
@@ -86,6 +91,8 @@ export function createScene(): SceneState {
     birdTimer: 12,
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
     harborRects: [],
+    inspect: null,
+    keys: new Set(),
   }
 }
 
@@ -100,6 +107,12 @@ export function shipBlitPos(s: SceneState): { x: number; y: number } {
   }
 }
 
+/** Vertical hull bob, shared by the sea renderer and the inspect handoff. */
+export function shipBobOffset(s: SceneState): number {
+  const bobRate = s.voyage.mode === "failed" ? 1.2 : 2.1
+  return Math.round(Math.sin(s.t * bobRate) * 1.4)
+}
+
 export function updateScene(s: SceneState, dt: number) {
   s.t += dt
 
@@ -111,9 +124,10 @@ export function updateScene(s: SceneState, dt: number) {
   s.scrollX += SEA_VX * s.speed * dt
   s.scrollY -= SEA_VY * s.speed * dt
 
-  // Wake foam shed at the stern while the ship has way on.
+  // Wake foam shed at the stern while the ship has way on (and is actually
+  // in the water — not while it's lifted out for inspection).
   s.wakeTimer -= dt
-  if (s.speed > 0.3 && s.wakeTimer <= 0 && s.bufW > 0) {
+  if (s.mode === "sea" && s.speed > 0.3 && s.wakeTimer <= 0 && s.bufW > 0) {
     s.wakeTimer = 0.12
     const pos = shipBlitPos(s)
     const n = 1 + (Math.random() < 0.4 ? 1 : 0)

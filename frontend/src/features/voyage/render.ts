@@ -3,8 +3,9 @@
 // destroy the pixel-art crispness.
 
 import { drawSea, hash2, horizonY } from "./sea"
-import { shipBlitPos, type SceneState } from "./scene"
+import { shipBlitPos, shipBobOffset, type SceneState } from "./scene"
 import { COLORS, type Sprites } from "./sprites"
+import { drawInspect } from "./inspect"
 import type { HarborState } from "./progress"
 
 export function drawFrame(
@@ -13,8 +14,17 @@ export function drawFrame(
   sprites: Sprites
 ) {
   if (s.bufW <= 0 || s.bufH <= 0) return
-  if (s.mode !== "sea") return // "zooming" / "interior" arrive in a later pass
+  // The sea keeps living behind the inspection view, just dimmed — only the
+  // ship itself is lifted out and drawn live by the voxel renderer on top.
+  drawSeaScene(ctx, s, sprites)
+  if (s.mode === "inspect") drawInspect(ctx, s, sprites)
+}
 
+function drawSeaScene(
+  ctx: CanvasRenderingContext2D,
+  s: SceneState,
+  sprites: Sprites
+) {
   const hy = horizonY(s.bufH)
 
   // Sky, stars, moon, horizon.
@@ -37,14 +47,22 @@ export function drawFrame(
 
   // Contact shadow stays on the waterline; the hull bobs off it.
   const pos = shipBlitPos(s)
-  ctx.drawImage(sprites.ferryShadow, pos.x, pos.y + 1)
-
-  const bobRate = s.voyage.mode === "failed" ? 1.2 : 2.1
-  const bob = Math.round(Math.sin(s.t * bobRate) * 1.4)
-  const frame = Math.floor(s.t * 2.2) % 2
-  const ferry = sprites.ferry[frame]
-  ctx.drawImage(ferry, pos.x, pos.y + bob)
-  s.shipRect = { x: pos.x, y: pos.y + bob, w: ferry.width, h: ferry.height }
+  if (s.mode === "sea") {
+    ctx.drawImage(sprites.ferryShadow, pos.x, pos.y + 1)
+    const bob = shipBobOffset(s)
+    const frame = Math.floor(s.t * 2.2) % 2
+    const ferry = sprites.ferry[frame]
+    ctx.drawImage(ferry, pos.x, pos.y + bob)
+    s.shipRect = { x: pos.x, y: pos.y + bob, w: ferry.width, h: ferry.height }
+  } else if (s.inspect) {
+    // Ship is lifted out for inspection; its contact shadow fades away.
+    const a = Math.max(0, 1 - s.inspect.dim * 2.5)
+    if (a > 0) {
+      ctx.globalAlpha = a
+      ctx.drawImage(sprites.ferryShadow, pos.x, pos.y + 1)
+      ctx.globalAlpha = 1
+    }
+  }
 
   // Sky dressing above everything in its band.
   for (const c of s.clouds) {
