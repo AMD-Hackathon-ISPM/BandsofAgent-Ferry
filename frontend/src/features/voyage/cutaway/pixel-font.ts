@@ -47,8 +47,8 @@ const GLYPHS: Record<string, number[]> = {
 export const PIXEL_FONT_H = 5
 const ADVANCE = 4
 
-export function pixelTextWidth(text: string): number {
-  return text.length === 0 ? 0 : text.length * ADVANCE - 1
+export function pixelTextWidth(text: string, scale = 1): number {
+  return text.length === 0 ? 0 : (text.length * ADVANCE - 1) * scale
 }
 
 export function drawPixelText(
@@ -56,21 +56,23 @@ export function drawPixelText(
   text: string,
   x: number,
   y: number,
-  color: string
+  color: string,
+  scale = 1
 ) {
   ctx.fillStyle = color
   let cx = Math.floor(x)
   const cy = Math.floor(y)
+  const s = scale
   for (const ch of text.toUpperCase()) {
     const g = GLYPHS[ch]
     if (g) {
       for (let r = 0; r < 5; r++) {
         const bits = g[r]
-        if (bits & 4) ctx.fillRect(cx, cy + r, 1, 1)
-        if (bits & 2) ctx.fillRect(cx + 1, cy + r, 1, 1)
-        if (bits & 1) ctx.fillRect(cx + 2, cy + r, 1, 1)
+        if (bits & 4) ctx.fillRect(cx, cy + r * s, s, s)
+        if (bits & 2) ctx.fillRect(cx + s, cy + r * s, s, s)
+        if (bits & 1) ctx.fillRect(cx + 2 * s, cy + r * s, s, s)
       }
     }
-    cx += ADVANCE
+    cx += ADVANCE * s
   }
 }

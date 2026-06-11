@@ -23,6 +23,7 @@ import {
   type VoxelTarget,
 } from "./voxel/voxel-render"
 import { CUTAWAY_PZ, getInteriorCanvas } from "./cutaway/cutaway-render"
+import { drawInteriorAnimations } from "./cutaway/interior-art"
 
 const TWO_PI = Math.PI * 2
 /** Port profile, bow pointing left. */
@@ -481,10 +482,20 @@ export function drawInspect(
   // Interior cross-section beneath the fading shell. Only meaningful at the
   // flat pose (reveal only ramps while tilt is 0 and the zoom is integer).
   if (ins.reveal > 0.01) {
-    const interior = getInteriorCanvas(Math.round(ins.zoom))
+    const zoom = Math.round(ins.zoom)
+    const interior = getInteriorCanvas(zoom)
     const ix = ox + Math.round((FERRY_CENTER_3D.x - FERRY_LX) * ins.zoom)
     const iy = oy + Math.round((ins.pz - FERRY_LZ) * ins.zoom)
     ctx.drawImage(interior, ix, iy)
+    // Live layer: screen flicker, LEDs, engine glow, steam, lamps, sea.
+    drawInteriorAnimations(
+      ctx,
+      ix,
+      iy,
+      zoom,
+      performance.now() / 1000,
+      ins.reveal
+    )
     ctx.globalAlpha = Math.max(0, 1 - ins.reveal)
   }
   ctx.drawImage(target.canvas, ox - BUF_W / 2, oy - BUF_H / 2)

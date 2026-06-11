@@ -19,9 +19,15 @@ export type RoomId =
   | "test_bay"
 
 export interface PropPlacement {
+  /** Sprite key in interior-art.ts SPRITES. */
   kind: string
-  /** Model space, relative to the room's x0/z0. */
+  /** Cells from the room's screen-left (bow-side) edge. */
   x: number
+  /**
+   * Cells above the room's z0 where the sprite's bottom rests: the floor
+   * surface is 2 (1 in shallow rooms like the bridge); larger values mount
+   * the sprite on the wall or stack it on furniture.
+   */
   z: number
 }
 
@@ -57,6 +63,13 @@ export const ROOMS: RoomDef[] = [
     z0: DECKS.wheel.z0 + 1,
     z1: DECKS.wheel.z1 - 1,
     accentVar: "--agent-commander",
+    props: [
+      { kind: "bridgescreens", x: 1.5, z: 3.9 },
+      { kind: "console", x: 1.5, z: 1 },
+      { kind: "wheel", x: 10.5, z: 1 },
+      { kind: "captainchair", x: 14, z: 1 },
+      { kind: "radarscope", x: 17.5, z: 1 },
+    ],
   },
   {
     id: "chart_room",
@@ -67,6 +80,15 @@ export const ROOMS: RoomDef[] = [
     z0: DECKS.tier2.z0 + 1,
     z1: DECKS.tier2.z1 - 1,
     accentVar: "--agent-router",
+    props: [
+      { kind: "chartwall", x: 4, z: 4.5 },
+      { kind: "wallclock", x: 21.5, z: 6 },
+      { kind: "maptable", x: 13, z: 2 },
+      { kind: "desk", x: 24, z: 2 },
+      { kind: "bookshelf", x: 32, z: 2 },
+      { kind: "globe", x: 38, z: 2 },
+      { kind: "plant", x: 42, z: 2 },
+    ],
   },
   {
     id: "review_lounge",
@@ -77,6 +99,16 @@ export const ROOMS: RoomDef[] = [
     z0: DECKS.tier1.z0 + 1,
     z1: DECKS.tier1.z1 - 1,
     accentVar: "--agent-review",
+    props: [
+      { kind: "rug", x: 12, z: 2 },
+      { kind: "bookshelf", x: 1.5, z: 2 },
+      { kind: "sofa", x: 7.5, z: 2 },
+      { kind: "coffeetable", x: 15.5, z: 2 },
+      { kind: "armchair", x: 20, z: 2 },
+      { kind: "floorlamp", x: 24, z: 2 },
+      { kind: "plant", x: 26.5, z: 2 },
+      { kind: "picture", x: 12.5, z: 7.5 },
+    ],
   },
   {
     id: "mess_hall",
@@ -86,6 +118,14 @@ export const ROOMS: RoomDef[] = [
     x1: 66,
     z0: DECKS.tier1.z0 + 1,
     z1: DECKS.tier1.z1 - 1,
+    props: [
+      { kind: "shelfbottles", x: 1.5, z: 7.5 },
+      { kind: "counter", x: 1, z: 2 },
+      { kind: "diningset", x: 8, z: 2 },
+      { kind: "vending", x: 16.5, z: 2 },
+      { kind: "menuboard", x: 9.5, z: 8 },
+      { kind: "extinguisher", x: 15, z: 4 },
+    ],
   },
   {
     id: "crew_quarters",
@@ -95,6 +135,11 @@ export const ROOMS: RoomDef[] = [
     x1: DECKS.tier1.x1 - 1,
     z0: DECKS.tier1.z0 + 1,
     z1: DECKS.tier1.z1 - 1,
+    props: [
+      { kind: "bunk", x: 1, z: 2 },
+      { kind: "locker", x: 8.5, z: 2 },
+      { kind: "bunk", x: 11.5, z: 2 },
+    ],
   },
   {
     id: "engine_room",
@@ -105,6 +150,17 @@ export const ROOMS: RoomDef[] = [
     z0: 3,
     z1: 14,
     accentVar: "--agent-dbmig",
+    props: [
+      { kind: "pipesrun", x: 3, z: 8.5 },
+      { kind: "pipesrun", x: 14, z: 8.5 },
+      { kind: "engine", x: 3, z: 2 },
+      { kind: "gaugewall", x: 16, z: 5.5 },
+      { kind: "ventduct", x: 24, z: 8.5 },
+      { kind: "tank", x: 20.5, z: 2 },
+      { kind: "barrel", x: 24.5, z: 2 },
+      { kind: "barrel", x: 26.8, z: 2 },
+      { kind: "extinguisher", x: 16.5, z: 2 },
+    ],
   },
   {
     id: "workshop",
@@ -115,6 +171,17 @@ export const ROOMS: RoomDef[] = [
     z0: 3,
     z1: 14,
     accentVar: "--agent-codegen",
+    props: [
+      { kind: "toolwall", x: 3.5, z: 6 },
+      { kind: "workbench", x: 2, z: 2 },
+      { kind: "lathe", x: 13, z: 2 },
+      { kind: "cratestack", x: 19.5, z: 2 },
+      { kind: "crate", x: 25.5, z: 2 },
+      { kind: "barrel", x: 29.5, z: 2 },
+      { kind: "gaugewall", x: 25, z: 6.5 },
+      { kind: "ventduct", x: 31, z: 8.5 },
+      { kind: "extinguisher", x: 33.5, z: 2 },
+    ],
   },
   {
     id: "test_bay",
@@ -125,6 +192,14 @@ export const ROOMS: RoomDef[] = [
     z0: 3,
     z1: 14,
     accentVar: "--agent-test",
+    props: [
+      { kind: "monitorwall", x: 4, z: 2 },
+      { kind: "testpod", x: 13.5, z: 2 },
+      { kind: "serverrack", x: 20, z: 2 },
+      { kind: "ventduct", x: 14, z: 8.5 },
+      { kind: "crate", x: 25, z: 2 },
+      { kind: "barrel", x: 29, z: 2 },
+    ],
   },
 ]
 
