@@ -3,7 +3,7 @@
 
 import { SEA_VX, SEA_VY, horizonY } from "./sea"
 import { FERRY_ANCHOR, FERRY_STERN } from "./sprites"
-import { VOYAGE_STOP_COUNT, type VoyageStatus } from "./progress"
+import type { VoyageStatus } from "./progress"
 import type { InspectState } from "./inspect"
 
 /** "inspect" is the prop-inspection mode entered by clicking the ship. */
@@ -43,16 +43,14 @@ export interface SceneState {
   birdTimer: number
   /** Ship blit rect in art px, refreshed by render; used for click hit-tests. */
   shipRect: { x: number; y: number; w: number; h: number }
-  harborRects: Array<{ index: number; x: number; y: number; w: number; h: number }>
   /** Live prop-inspection state while mode === "inspect". */
   inspect: InspectState | null
   /** Currently held pan keys (arrows), maintained by the canvas hook. */
   keys: Set<string>
   onShipClick?: () => void
-  onHarborClick?: (index: number) => void
 }
 
-const MAX_WAKE = 80
+const MAX_WAKE = 120
 
 const SPEED_TARGET: Record<VoyageStatus["mode"], number> = {
   pending: 0.35,
@@ -76,21 +74,17 @@ export function createScene(): SceneState {
       target: 0,
       mode: "pending",
       stop: 0,
-      harborStates: Array.from({ length: VOYAGE_STOP_COUNT }, (_, index) =>
-        index === 0 ? "active" : "upcoming"
-      ),
     },
     wake: [],
     wakeTimer: 0,
     clouds: [
-      { x: 30, y: 8, idx: 0 },
-      { x: 180, y: 22, idx: 1 },
-      { x: 320, y: 14, idx: 2 },
+      { x: 45, y: 12, idx: 0 },
+      { x: 270, y: 33, idx: 1 },
+      { x: 480, y: 21, idx: 2 },
     ],
     bird: null,
     birdTimer: 12,
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
-    harborRects: [],
     inspect: null,
     keys: new Set(),
   }
@@ -110,7 +104,7 @@ export function shipBlitPos(s: SceneState): { x: number; y: number } {
 /** Vertical hull bob, shared by the sea renderer and the inspect handoff. */
 export function shipBobOffset(s: SceneState): number {
   const bobRate = s.voyage.mode === "failed" ? 1.2 : 2.1
-  return Math.round(Math.sin(s.t * bobRate) * 1.4)
+  return Math.round(Math.sin(s.t * bobRate) * 2.2)
 }
 
 export function updateScene(s: SceneState, dt: number) {
@@ -133,10 +127,10 @@ export function updateScene(s: SceneState, dt: number) {
     const n = 1 + (Math.random() < 0.4 ? 1 : 0)
     for (let i = 0; i < n; i++) {
       s.wake.push({
-        x: pos.x + FERRY_STERN.x + (Math.random() * 6 - 3),
-        y: pos.y + FERRY_STERN.y + (Math.random() * 3 - 1),
-        vx: -SEA_VX * s.speed + (Math.random() * 6 - 3),
-        vy: SEA_VY * s.speed + (Math.random() * 3 - 1.5),
+        x: pos.x + FERRY_STERN.x + (Math.random() * 10 - 5),
+        y: pos.y + FERRY_STERN.y + (Math.random() * 5 - 2),
+        vx: -SEA_VX * s.speed + (Math.random() * 9 - 4.5),
+        vy: SEA_VY * s.speed + (Math.random() * 4.5 - 2.25),
         age: 0,
         life: 1.8 + Math.random() * 1.2,
       })
@@ -156,24 +150,24 @@ export function updateScene(s: SceneState, dt: number) {
 
   // Clouds: far parallax, ~0.3× sea speed.
   for (const c of s.clouds) {
-    c.x -= (SEA_VX * 0.3 * s.speed + 1.5) * dt
-    if (c.x < -40) {
-      c.x = s.bufW + 20 + Math.random() * 60
-      c.y = 4 + Math.random() * Math.max(8, horizonY(s.bufH) - 18)
+    c.x -= (SEA_VX * 0.3 * s.speed + 2.25) * dt
+    if (c.x < -60) {
+      c.x = s.bufW + 30 + Math.random() * 90
+      c.y = 6 + Math.random() * Math.max(12, horizonY(s.bufH) - 27)
     }
   }
 
   // The occasional passing bird.
   if (s.bird) {
-    s.bird.x += 16 * dt
-    if (s.bird.x > s.bufW + 10) s.bird = null
+    s.bird.x += 24 * dt
+    if (s.bird.x > s.bufW + 15) s.bird = null
   } else {
     s.birdTimer -= dt
     if (s.birdTimer <= 0 && s.bufH > 0) {
       s.birdTimer = 14 + Math.random() * 16
       s.bird = {
-        x: -8,
-        baseY: 6 + Math.random() * Math.max(6, horizonY(s.bufH) * 0.6),
+        x: -12,
+        baseY: 9 + Math.random() * Math.max(9, horizonY(s.bufH) * 0.6),
         phase: Math.random() * Math.PI * 2,
       }
     }

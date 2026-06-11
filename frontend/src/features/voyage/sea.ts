@@ -10,8 +10,8 @@ export const TILE_W = 16
 export const TILE_H = 8
 
 /** Sea scroll speed in art px/s; 2:1 so the drift matches the iso heading. */
-export const SEA_VX = 28
-export const SEA_VY = 14
+export const SEA_VX = 42
+export const SEA_VY = 21
 
 const SEA_BASE = "#15223f"
 const CREST = "#31456e"

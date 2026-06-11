@@ -38,16 +38,16 @@ const HOLD_YAW = Math.PI
 const ENTER_REVS = 2
 const ENTER_DUR = 1.7
 const EXIT_DUR = 1.1
-const PAN_SPEED = 140
+const PAN_SPEED = 210
 /** Minimum art px of ship kept on-screen while panning. */
-const PAN_MARGIN_X = 48
-const PAN_MARGIN_Y = 32
+const PAN_MARGIN_X = 72
+const PAN_MARGIN_Y = 48
 const DIM_MAX = 0.65
 
 /** Offscreen buffer for the live voxel render; sized for the max hold zoom. */
-const BUF_W = 320
-const BUF_H = 256
-const MAX_ZOOM = 7
+const BUF_W = 480
+const BUF_H = 360
+const MAX_ZOOM = 10
 
 export interface InspectState {
   phase: "enter" | "hold" | "exit"

@@ -20,7 +20,7 @@ import {
 
 /** The classic 2:1 iso heading the old sprite was authored at. */
 export const BAKED_YAW = Math.PI / 4
-export const BAKED_ZOOM = 2
+export const BAKED_ZOOM = 4
 
 // Matches COLORS.outline / COLORS.shadow / F.foam in sprites.ts.
 const OUTLINE = "#0e1730"
@@ -112,18 +112,24 @@ export function bakeFerrySprites(): FerryBake {
     }
   }
 
+  // Four bob frames: the foam dither crawls along the waterline and the foam
+  // band breathes one pixel thicker on the middle frames.
   const frames: HTMLCanvasElement[] = []
-  for (let frame = 0; frame < 2; frame++) {
+  for (let frame = 0; frame < 4; frame++) {
     const c = document.createElement("canvas")
     c.width = w
     c.height = h
     const ctx = c.getContext("2d")!
     ctx.drawImage(t.canvas, 0, 0)
     ctx.fillStyle = FOAM
+    const thick = frame === 1 || frame === 2
     for (let x = 0; x < w; x++) {
       const yb = bottoms[x]
       if (yb < 0 || yb + 1 >= h) continue
-      if ((x + frame * 2) % 4 < 2) ctx.fillRect(x, yb + 1, 1, 1)
+      if ((x + frame) % 4 < 2) ctx.fillRect(x, yb + 1, 1, 1)
+      if (thick && yb + 2 < h && (x + frame) % 8 < 2) {
+        ctx.fillRect(x, yb + 2, 1, 1)
+      }
     }
     frames.push(c)
   }

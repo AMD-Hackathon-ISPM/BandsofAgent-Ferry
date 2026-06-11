@@ -14,21 +14,12 @@ export type VoyageMode =
   | "failed"
   | "blocked"
 
-export type HarborState =
-  | "done"
-  | "active"
-  | "upcoming"
-  | "skipped"
-  | "failed"
-  | "blocked"
-
 export interface VoyageStatus {
   /** Voyage completion 0..1; the render loop eases toward this. */
   target: number
   mode: VoyageMode
-  /** Current agent harbor, 0..8. */
+  /** Current agent stop, 0..8 — still drives pacing and labels. */
   stop: number
-  harborStates: HarborState[]
 }
 
 export const VOYAGE_STOP_COUNT = AGENT_ORDER.length
@@ -102,25 +93,11 @@ function latestReworkSignal(run: Run) {
   })
 }
 
-function harborStates(run: Run, stop: number, mode: VoyageMode): HarborState[] {
-  return AGENT_ORDER.map((agent, index) => {
-    if (agent === "db_migration" && !run.project.dbEnabled) return "skipped"
-    if (index === stop) {
-      if (mode === "failed") return "failed"
-      if (mode === "blocked") return "blocked"
-      return "active"
-    }
-    if (index < stop) return "done"
-    return "upcoming"
-  })
-}
-
-function status(run: Run, stop: number, mode: VoyageMode): VoyageStatus {
+function status(stop: number, mode: VoyageMode): VoyageStatus {
   return {
     target: stopTarget(stop),
     mode,
     stop,
-    harborStates: harborStates(run, stop, mode),
   }
 }
 
@@ -130,12 +107,12 @@ export function deriveVoyage(run: Run): VoyageStatus {
     ? agentIndex.get(reworkSignal.targetAgent ?? "code_generator") ??
       STATUS_STOP.needs_rework
     : deriveStop(run)
-  if (run.status === "completed") return status(run, 8, "arrived")
-  if (run.status === "pending") return status(run, stop, "pending")
+  if (run.status === "completed") return status(8, "arrived")
+  if (run.status === "pending") return status(stop, "pending")
 
-  if (run.status === "failed") return status(run, stop, "failed")
+  if (run.status === "failed") return status(stop, "failed")
   if (run.status === "blocked" || run.status === "needs_rework") {
-    return status(run, stop, "blocked")
+    return status(stop, "blocked")
   }
-  return status(run, stop, "sailing")
+  return status(stop, "sailing")
 }

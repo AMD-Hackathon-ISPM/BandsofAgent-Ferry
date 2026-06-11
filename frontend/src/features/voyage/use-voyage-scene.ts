@@ -14,7 +14,7 @@ import {
 import { VOYAGE_STOP_COUNT, type VoyageStatus } from "./progress"
 
 /** Art pixels are this many CSS px wide (snapped to the device-pixel grid). */
-const PIXEL_SCALE = 3
+const PIXEL_SCALE = 2
 
 /**
  * Owns the voyage canvas: sprite baking, DPR-snapped low-res buffer sizing,
@@ -26,7 +26,6 @@ const PIXEL_SCALE = 3
 export function useVoyageScene(
   voyage: VoyageStatus,
   options: {
-    onHarborClick?: (index: number) => void
     /** Fires when the ship-inspection mode is entered/left. */
     onInspectChange?: (active: boolean) => void
   } = {}
@@ -38,14 +37,12 @@ export function useVoyageScene(
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const reduced = usePrefersReducedMotion()
   const voyageRef = React.useRef(voyage)
-  const onHarborClickRef = React.useRef(options.onHarborClick)
   const onInspectChangeRef = React.useRef(options.onInspectChange)
   const stillFrameRef = React.useRef<(() => void) | null>(null)
 
   React.useEffect(() => {
-    onHarborClickRef.current = options.onHarborClick
     onInspectChangeRef.current = options.onInspectChange
-  }, [options.onHarborClick, options.onInspectChange])
+  }, [options.onInspectChange])
 
   React.useEffect(() => {
     const wrap = wrapRef.current
@@ -57,7 +54,6 @@ export function useVoyageScene(
     const sprites = bakeSprites()
     const scene = createScene()
     scene.voyage = voyageRef.current
-    scene.onHarborClick = (index) => onHarborClickRef.current?.(index)
 
     let lastInspecting = false
     const notifyInspect = () => {
@@ -161,17 +157,10 @@ export function useVoyageScene(
       const r = scene.shipRect
       const onShip = p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
       if (scene.mode === "inspect") {
-        // Harbors are inert while inspecting; a real click (not the tail end
-        // of a drag) outside the ship puts it back.
+        // A real click (not the tail end of a drag) outside the ship puts it
+        // back in the water.
         if (!dragMoved && !onShip) leaveInspect()
         return
-      }
-      for (let i = scene.harborRects.length - 1; i >= 0; i--) {
-        const h = scene.harborRects[i]
-        if (p.x >= h.x && p.x < h.x + h.w && p.y >= h.y && p.y < h.y + h.h) {
-          scene.onHarborClick?.(h.index)
-          return
-        }
       }
       if (onShip) scene.onShipClick?.()
     }
@@ -225,16 +214,8 @@ export function useVoyageScene(
       const p = toArt(e)
       if (!p) return
       const r = scene.shipRect
-      let interactive =
+      const interactive =
         p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
-      if (!interactive) {
-        for (const h of scene.harborRects) {
-          if (p.x >= h.x && p.x < h.x + h.w && p.y >= h.y && p.y < h.y + h.h) {
-            interactive = true
-            break
-          }
-        }
-      }
       canvas.style.cursor = interactive ? "pointer" : "default"
     }
 
@@ -255,7 +236,7 @@ export function useVoyageScene(
         const ins = scene.inspect
         if (reduced && ins && ins.phase === "hold") {
           // No animation loop to consume held keys — pan in steps instead.
-          const step = 24
+          const step = 36
           if (e.key === "ArrowLeft") ins.panX -= step
           if (e.key === "ArrowRight") ins.panX += step
           if (e.key === "ArrowUp") ins.panY -= step
