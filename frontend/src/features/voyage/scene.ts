@@ -99,7 +99,9 @@ const SPEED_TARGET: Record<VoyageStatus["mode"], number> = {
 
 /** Ship x-fraction on open water. */
 const SEA_X = 0.5
-const DOOR_DUR = 1.2
+/** Cast-off budget before the pull-out: last vehicles board, the ramp swings
+ *  up, then the door plate seals (updateHarbor drives the actual phases). */
+const DOOR_DUR = 3.0
 /** Beat after the door seals before the ship starts pulling out. */
 const DEPART_HOLD = 0.3
 /** Sail-away top speed, ground units/s. */

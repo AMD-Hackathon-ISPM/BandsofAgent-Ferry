@@ -56,8 +56,8 @@ export interface HarborSite {
   fy: number
 }
 
-export const DEPART_SITE: HarborSite = { fx: 0.4, fy: 0.62 }
-export const DEST_SITE: HarborSite = { fx: 0.62, fy: 0.42 }
+export const DEPART_SITE: HarborSite = { fx: 0.3, fy: 0.64 }
+export const DEST_SITE: HarborSite = { fx: 0.46, fy: 0.46 }
 
 function groundOrigin(s: SceneState, site: HarborSite): { x: number; y: number } {
   return { x: Math.floor(s.bufW * site.fx), y: Math.floor(s.bufH * site.fy) }
@@ -106,9 +106,11 @@ export function destApproachStartG(s: SceneState): number {
 
 // --- Layout (ground units relative to the berth stern point) ---------------
 
-/** Departure quay: bleeds off the bottom and left screen edges. */
+/** Departure quay: bleeds off the bottom and left screen edges. Its berth
+ *  edge stops short of the stern (gx −4) so the hull floats off the dock and
+ *  the ramp bridges the water gap. */
 const QUAY_G = { x: -150, y: -14, z: -2 }
-const QUAY_LX = 164
+const QUAY_LX = 146
 const QUAY_LY = 204
 
 /** Boarding path: entry road (off-screen bottom) → T-intersection → lane →
@@ -116,7 +118,9 @@ const QUAY_LY = 204
 const LANE_Y = 7
 const INT_X = -64
 const RAMP_X = -16
-const DOOR_Z = 7
+/** Door sill / top heights, matching the door painted on the baked transom. */
+const DOOR_Z = 3
+const DOOR_TOP = 14
 const ENTRY_Y = 180
 const LEG_A = ENTRY_Y - LANE_Y // entry road
 const LEG_B = RAMP_X - INT_X // lane to the ramp foot
@@ -129,21 +133,21 @@ const ROAD_HALF_W = 5
 const DEPART_ROADS: QuayRoads = {
   laneY: LANE_Y - QUAY_G.y,
   laneX0: 20,
-  laneX1: 160,
+  laneX1: RAMP_X - QUAY_G.x,
   entryX: INT_X - QUAY_G.x,
   halfW: ROAD_HALF_W,
   lots: [
-    // Left of the entry road.
-    { x0: -114 - QUAY_G.x, x1: -74 - QUAY_G.x, y0: 16 - QUAY_G.y, y1: 46 - QUAY_G.y, pitch: 18 },
-    // Between the entry road and the ramp apron.
-    { x0: -52 - QUAY_G.x, x1: -24 - QUAY_G.x, y0: 16 - QUAY_G.y, y1: 46 - QUAY_G.y, pitch: 18 },
+    // Main lot between the entry road and the ramp apron.
+    { x0: -52 - QUAY_G.x, x1: -12 - QUAY_G.x, y0: 16 - QUAY_G.y, y1: 46 - QUAY_G.y, pitch: 18 },
+    // Overflow lot left of the entry road, bleeding off the bottom edge.
+    { x0: -114 - QUAY_G.x, x1: -74 - QUAY_G.x, y0: 32 - QUAY_G.y, y1: 62 - QUAY_G.y, pitch: 18 },
   ],
 }
 
 /** Destination quay: bleeds off the top and right screen edges; the ship
  *  berths along its camera-facing front edge. */
-const DEST_QUAY_G = { x: -20, y: -110, z: -2 }
-const DEST_QUAY_LX = 170
+const DEST_QUAY_G = { x: -60, y: -110, z: -2 }
+const DEST_QUAY_LX = 210
 const DEST_QUAY_LY = 96
 
 const DEST_ROADS: QuayRoads = {
@@ -157,12 +161,14 @@ const DEST_ROADS: QuayRoads = {
 
 /** Static parked cars dressing the lots: [gx, gy, spriteIdx]. */
 const PARKED: Array<[number, number, number]> = [
-  [-111, 22, 0],
-  [-93, 22, 3],
-  [-111, 36, 5],
-  [-93, 36, 1],
-  [-49, 22, 6],
-  [-49, 36, 4],
+  // Main lot.
+  [-49, 22, 0],
+  [-31, 22, 3],
+  [-49, 36, 5],
+  [-31, 36, 1],
+  // Overflow lot (partially bleeding off the bottom edge).
+  [-93, 38, 6],
+  [-111, 38, 4],
 ]
 
 const VEHICLE_KINDS: VehicleKind[] = ["car", "van", "truck", "car", "bus", "car", "truck", "van"]
@@ -212,6 +218,11 @@ export interface Vehicle {
 export interface HarborState {
   vehicles: Vehicle[]
   spawnTimer: number
+  /** Ramp stow progress, 0 lowered .. 1 vertical against the transom. Holds
+   *  at 0 until every boarding vehicle has cleared the ramp and hold. */
+  rampStow: number
+  /** Door plate seal progress, 0 open .. 1 sealed; runs after the ramp. */
+  doorSeal: number
 }
 
 function makeVehicle(sprite: number, dist: number): Vehicle {
@@ -231,11 +242,13 @@ export function createHarborState(): HarborState {
   for (let i = 0; i < seeds.length; i++) {
     vehicles.push(makeVehicle(i % VEHICLE_KINDS.length, seeds[i]))
   }
-  return { vehicles, spawnTimer: 2 }
+  return { vehicles, spawnTimer: 2, rampStow: 0, doorSeal: 0 }
 }
 
 const VEH_MAX_SPEED = 16
 const VEH_GAP = 8
+const RAMP_STOW_DUR = 0.9
+const DOOR_SEAL_DUR = 1.0
 
 export function updateHarbor(s: SceneState, dt: number) {
   const h = s.harbor
@@ -250,7 +263,7 @@ export function updateHarbor(s: SceneState, dt: number) {
     const ahead = i > 0 ? h.vehicles[i - 1] : null
     let limit = ahead
       ? ahead.dist - ahead.len - VEH_GAP
-      : PATH_LEN + v.len + 2
+      : PATH_LEN + v.len + 6
     if (sealing && v.dist <= LANE_END) limit = Math.min(limit, LANE_END - 6)
     const hurry = sealing && v.dist > LANE_END
     const target = hurry
@@ -258,7 +271,9 @@ export function updateHarbor(s: SceneState, dt: number) {
       : Math.max(0, Math.min(VEH_MAX_SPEED, (limit - v.dist) * 2.5))
     v.speed += (target - v.speed) * Math.min(1, dt * 4)
     v.dist += v.speed * dt
-    if (v.dist >= PATH_LEN + v.len) h.vehicles.splice(i, 1)
+    // Despawn only once the tail is fully through the door plane (plus a
+    // safety margin) — until then the clip mask swallows it pixel by pixel.
+    if (v.dist >= PATH_LEN + v.len + 2) h.vehicles.splice(i, 1)
   }
 
   // Keep the queue replenished while still loading. New vehicles appear at
@@ -272,6 +287,20 @@ export function updateHarbor(s: SceneState, dt: number) {
     } else {
       h.spawnTimer = 0.4
     }
+  }
+
+  // Cast-off choreography: once the last boarding vehicle is aboard, the ramp
+  // swings up against the transom, then the hull door plate seals over it.
+  const boarding = h.vehicles.some((v) => v.dist > LANE_END)
+  if (sealing && !boarding) {
+    h.rampStow = Math.min(1, h.rampStow + dt / RAMP_STOW_DUR)
+  } else if (!sealing) {
+    h.rampStow = Math.max(0, h.rampStow - dt / RAMP_STOW_DUR)
+  }
+  if (sealing && h.rampStow >= 1) {
+    h.doorSeal = Math.min(1, h.doorSeal + dt / DOOR_SEAL_DUR)
+  } else if (!sealing) {
+    h.doorSeal = Math.max(0, h.doorSeal - dt / DOOR_SEAL_DUR)
   }
 }
 
@@ -288,13 +317,18 @@ function pathPoint(dist: number): {
   if (dist <= LANE_END) {
     return { x: INT_X + (dist - LEG_A), y: LANE_Y, z: 0, heading: "x" }
   }
-  const t = Math.min(1, (dist - LANE_END) / RAMP_LEN)
-  return {
-    x: RAMP_X + (0 - RAMP_X) * t,
-    y: LANE_Y * (1 - t),
-    z: DOOR_Z * t,
-    heading: "x",
+  if (dist <= PATH_LEN) {
+    const t = (dist - LANE_END) / RAMP_LEN
+    return {
+      x: RAMP_X + (0 - RAMP_X) * t,
+      y: LANE_Y * (1 - t),
+      z: DOOR_Z * t,
+      heading: "x",
+    }
   }
+  // Past the door plane: drive on into the hold so the clip mask can swallow
+  // the sprite nose-first instead of it vanishing whole at the doorway.
+  return { x: dist - PATH_LEN, y: 0, z: DOOR_Z, heading: "x" }
 }
 
 function blitSprite(
@@ -325,34 +359,35 @@ export function drawHarborBack(
   blitSprite(ctx, h.quay, place(s, SITE, QUAY_G.x, QUAY_G.y, QUAY_G.z))
 
   // Water reflections under the quay's lit waterfront edge.
-  drawReflections(ctx, s, SITE, -140, -2, -15, a)
+  drawReflections(ctx, s, SITE, -100, -6, -15, a)
 
-  // Terminal building tucked into the bottom-left corner, with its sign.
-  blitSprite(ctx, h.terminal, place(s, SITE, -138, 18, 0))
+  // Terminal building tucked into the bottom-left corner (half bleeding off
+  // the left edge), with its sign.
+  blitSprite(ctx, h.terminal, place(s, SITE, -118, 8, 0))
   drawSign(
     ctx,
     s,
-    place(s, SITE, -115, 26, 21),
+    place(s, SITE, -95, 16, 21),
     s.voyage.mode === "pending" ? "NOW BOARDING" : "DEPARTING",
     "#f2c14e"
   )
 
   // Waterfront dressing: lamps along the berth apron, trees between them and
-  // one by the parking lots.
+  // one on the green strip at the intersection corner.
   const lampsAt: Array<[number, number]> = [
-    [-135, -8],
-    [-112, -8],
-    [-90, -8],
-    [-46, -8],
+    [-88, -8],
+    [-56, -8],
+    [-24, -8],
+    [-74, 18],
   ]
   for (let i = 0; i < lampsAt.length; i++) {
     const [gx, gy] = lampsAt[i]
     blitSprite(ctx, h.lamp, place(s, SITE, gx, gy, 0))
     drawLampGlow(ctx, s, place(s, SITE, gx, gy, 15), i, a)
   }
-  blitSprite(ctx, h.trees[0], place(s, SITE, -123, -11, 0))
-  blitSprite(ctx, h.trees[1], place(s, SITE, -79, -11, 0))
-  blitSprite(ctx, h.trees[2], place(s, SITE, -40, 18, 0))
+  blitSprite(ctx, h.trees[0], place(s, SITE, -104, -11, 0))
+  blitSprite(ctx, h.trees[1], place(s, SITE, -40, -11, 0))
+  blitSprite(ctx, h.trees[2], place(s, SITE, -58, 20, 0))
 
   // Parked cars in the marked lots.
   for (const [gx, gy, idx] of PARKED) {
@@ -380,15 +415,16 @@ export function drawHarborFront(
   ctx.globalAlpha = a
   const SITE = DEPART_SITE
 
-  // Stern loading door first: the warm-lit cargo hold the cars drive into.
-  // It rides the ship's stern, so it follows the sail-away slide.
-  drawSternDoor(ctx, s)
-
-  // The drawbridge ramp from the quay edge up to the door sill, retracting as
-  // the door seals. Drawn as stacked iso rows of rects (no AA on the diagonal).
-  const ramp = 1 - clamp01(s.doorT * 1.6)
-  if (ramp > 0.04) {
-    drawRamp(ctx, s, ramp)
+  // Stern door, in two staged phases (timed by updateHarbor so they wait for
+  // boarding vehicles): first the ramp swings up against the transom
+  // (becoming the door), then the hull plate seals over it bottom-up. Once
+  // fully sealed nothing extra is drawn — the baked ship sprite already
+  // carries the painted closed door.
+  const hs = s.harbor
+  if (hs.doorSeal < 1) {
+    drawSternDoor(ctx, s)
+    drawRamp(ctx, s, hs.rampStow)
+    if (hs.doorSeal > 0) drawDoorSeal(ctx, s, hs.doorSeal)
   }
 
   // Cars climbing the ramp, in front of the hull but clipped to the boarding
@@ -408,8 +444,8 @@ export function drawHarborFront(
   // Mooring lines + a couple of bollards on the foreground quay lip. The
   // lines drop once the ship starts pulling out.
   if (s.shipG < 0.5) drawMooringLines(ctx, s, SITE)
-  blitSprite(ctx, h.bollard, place(s, SITE, -8, 20, 0))
-  blitSprite(ctx, h.bollard, place(s, SITE, -22, 16, 0))
+  blitSprite(ctx, h.bollard, place(s, SITE, -10, 20, 0))
+  blitSprite(ctx, h.bollard, place(s, SITE, -7, 30, 0))
 
   ctx.globalAlpha = 1
 }
@@ -458,31 +494,30 @@ export function drawDestinationBack(
     h.destQuay,
     place(s, SITE, DEST_QUAY_G.x, DEST_QUAY_G.y, DEST_QUAY_G.z)
   )
-  drawReflections(ctx, s, SITE, -10, 140, -16, a)
+  drawReflections(ctx, s, SITE, -40, 140, -16, a)
 
   // Terminal + the PR sign that flips green when the pull request is open.
-  blitSprite(ctx, h.terminal, place(s, SITE, 38, -52, 0))
+  // Dressing sits on the left stretch of quay the moored ship doesn't cover.
+  blitSprite(ctx, h.terminal, place(s, SITE, -34, -56, 0))
   drawSign(
     ctx,
     s,
-    place(s, SITE, 61, -44, 21),
+    place(s, SITE, -11, -48, 18),
     s.voyage.prReady ? "PR READY" : "ARRIVING",
     s.voyage.prReady ? "#52d273" : "#f2c14e"
   )
 
   const lampsAt: Array<[number, number]> = [
-    [6, -20],
-    [38, -20],
-    [70, -20],
-    [102, -20],
+    [-54, -20],
+    [-30, -20],
   ]
   for (let i = 0; i < lampsAt.length; i++) {
     const [gx, gy] = lampsAt[i]
     blitSprite(ctx, h.lamp, place(s, SITE, gx, gy, 0))
     drawLampGlow(ctx, s, place(s, SITE, gx, gy, 15), i + 2, a)
   }
-  blitSprite(ctx, h.trees[0], place(s, SITE, 22, -60, 0))
-  blitSprite(ctx, h.trees[2], place(s, SITE, 88, -64, 0))
+  blitSprite(ctx, h.trees[0], place(s, SITE, -48, -70, 0))
+  blitSprite(ctx, h.trees[2], place(s, SITE, 16, -62, 0))
 
   ctx.globalAlpha = 1
 }
@@ -523,8 +558,8 @@ function drawMooringLines(
   site: HarborSite
 ) {
   const lines: Array<[number, number, number, number, number, number]> = [
-    [-8, 20, 1, 2, 14, 11],
-    [-22, 16, 1, 6, 10, 11],
+    [-10, 20, 1, 2, 14, 11],
+    [-7, 30, 1, 10, 16, 11],
   ]
   for (const [gx0, gy0, gz0, gx1, gy1, gz1] of lines) {
     const a = place(s, site, gx0, gy0, gz0)
@@ -589,14 +624,23 @@ function drawVehicle(
 }
 
 /**
- * The drawbridge vehicle ramp: a thick slab from the quay edge up to the door
- * sill, with raised side curbs and a dashed centre lane line. `ramp` is 1 fully
- * lowered .. 0 stowed (the foot lifts toward the sill as the door seals).
+ * The vehicle ramp: a flat bridge slab from the quay edge across the berth
+ * gap to the door sill, with raised side curbs and a dashed centre lane line.
+ * `rampT` is 0 fully lowered .. 1 stowed — the ramp rotates up around the
+ * door sill hinge until it stands vertical against the transom, covering the
+ * opening like a real stern ramp-door.
  */
-function drawRamp(ctx: CanvasRenderingContext2D, s: SceneState, ramp: number) {
+function drawRamp(ctx: CanvasRenderingContext2D, s: SceneState, rampT: number) {
   const SITE = DEPART_SITE
-  const footX = RAMP_X + (1 - ramp) * (0 - RAMP_X)
-  const footZ = (1 - ramp) * DOOR_Z * 0.8
+  // Hinge at the door sill (gx 0, gz DOOR_Z); the foot starts on the quay
+  // (slight droop below the sill) and swings up to the door top. The slab
+  // shortens as it rises so the vertical plate covers the opening exactly.
+  const droop = Math.atan2(DOOR_Z, RAMP_LEN)
+  const ang = -droop + rampT * (Math.PI / 2 + droop)
+  const len = RAMP_LEN + (DOOR_TOP - DOOR_Z - RAMP_LEN) * rampT
+  const footX = -len * Math.cos(ang)
+  const footZ = DOOR_Z + len * Math.sin(ang)
+  const footY = LANE_Y * (1 - rampT)
   const halfW = 6
   // Deck planks across the ramp width, lighter down the centre lane. The deck
   // converges from the lane centreline (gy = LANE_Y) down to the door (gy = 0),
@@ -604,16 +648,18 @@ function drawRamp(ctx: CanvasRenderingContext2D, s: SceneState, ramp: number) {
   for (let g = -halfW; g <= halfW; g++) {
     const edge = Math.abs(g) >= halfW - 1
     const lane = Math.abs(g) <= 1
-    const a = place(s, SITE, footX, LANE_Y + g, footZ)
+    const a = place(s, SITE, footX, footY + g, footZ)
     const b = place(s, SITE, 0, g, DOOR_Z)
     const col = edge ? "#2c3a5e" : lane ? "#4a5c92" : "#3b4c78"
     isoBand(ctx, a, b, col)
   }
-  // Raised curbs along both ramp edges.
-  for (const g of [-halfW, halfW]) {
-    const a = place(s, SITE, footX, LANE_Y + g, footZ + 1)
-    const b = place(s, SITE, 0, g, DOOR_Z + 1)
-    isoBand(ctx, a, b, "#8e9cbd")
+  // Raised curbs along both ramp edges (folded flat once stowing begins).
+  if (rampT < 0.2) {
+    for (const g of [-halfW, halfW]) {
+      const a = place(s, SITE, footX, footY + g, footZ + 1)
+      const b = place(s, SITE, 0, g, DOOR_Z + 1)
+      isoBand(ctx, a, b, "#8e9cbd")
+    }
   }
   // Dashed centre lane marking, following the same converging centreline.
   const segs = 6
@@ -621,7 +667,7 @@ function drawRamp(ctx: CanvasRenderingContext2D, s: SceneState, ramp: number) {
     if (i % 2 === 1) continue
     const t = i / segs
     const gx = footX + (0 - footX) * t
-    const gy = LANE_Y * (1 - t)
+    const gy = footY * (1 - t)
     const gz = footZ + (DOOR_Z - footZ) * t
     const a = place(s, SITE, gx, gy, gz + 0.5)
     rect(ctx, Math.floor(a.x), Math.floor(a.y), 2, 2, "#c6d0e6")
@@ -648,38 +694,48 @@ function isoBand(
   }
 }
 
+/**
+ * The open stern doorway: a dark hold cut into the transom, matching the
+ * footprint of the closed door painted on the baked ship (gy −6..6,
+ * z DOOR_Z..DOOR_TOP). Deliberately unlit — boarding cars read as driving
+ * into shadow, and the clip corridor erases them at this plane.
+ */
 function drawSternDoor(ctx: CanvasRenderingContext2D, s: SceneState) {
   const SITE = DEPART_SITE
   const g = s.shipG // the door rides the stern through the sail-away
-  const doorFrac = 1 - s.doorT
-  // Dark opening frame on the stern face (x=g), spanning gy −6..+6, z 1..16.
-  for (let z = 1; z <= 16; z++) {
+  // Dark opening frame on the stern face (x=g).
+  for (let z = DOOR_Z; z <= DOOR_TOP; z++) {
     const a = place(s, SITE, g, -6, z)
     const b = place(s, SITE, g, 6, z)
     isoBand(ctx, a, b, "#0e1730")
   }
-  // Warm-lit car deck interior, height shrinking bottom-up as the door seals.
-  const top = 1 + Math.round(15 * doorFrac)
-  for (let z = 1; z <= top; z++) {
+  // Faint cold sheen on the hold deck so the opening reads as depth.
+  for (let z = DOOR_Z; z <= DOOR_Z + 1; z++) {
     const a = place(s, SITE, g, -5, z)
     const b = place(s, SITE, g, 5, z)
-    isoBand(ctx, a, b, z === top && doorFrac > 0.3 ? "#f4f7fd" : "#f2c14e")
+    isoBand(ctx, a, b, "#22335c")
   }
-  if (doorFrac > 0.45) {
-    // Interior pillars between deck lanes — darker vertical ribs.
-    for (const gy of [-3, 0, 3]) {
-      const a = place(s, SITE, g, gy, 1)
-      const b = place(s, SITE, g, gy, Math.min(top, 13))
-      isoBand(ctx, a, b, "#33466f")
-    }
-    // Two car silhouettes parked inside, hinting the loaded hold.
-    for (const [gy, col] of [[-3, "#1b2747"], [2, "#26365b"]] as const) {
-      for (let z = 2; z <= 6; z++) {
-        const a = place(s, SITE, g, gy - 1.5, z)
-        const b = place(s, SITE, g, gy + 1.5, z)
-        isoBand(ctx, a, b, col)
-      }
-    }
+  // Interior pillars between deck lanes — barely-there vertical ribs.
+  for (const gy of [-3, 0, 3]) {
+    const a = place(s, SITE, g, gy, DOOR_Z + 2)
+    const b = place(s, SITE, g, gy, DOOR_TOP - 2)
+    isoBand(ctx, a, b, "#16213f")
+  }
+}
+
+/**
+ * The hull door plate sealing the opening bottom-up behind the stowed ramp,
+ * painted in the same plating colour as the closed door on the baked ship so
+ * the hand-off at doorT = 1 is seamless.
+ */
+function drawDoorSeal(ctx: CanvasRenderingContext2D, s: SceneState, sealT: number) {
+  const SITE = DEPART_SITE
+  const g = s.shipG
+  const top = DOOR_Z + Math.round((DOOR_TOP - DOOR_Z) * sealT)
+  for (let z = DOOR_Z; z <= top; z++) {
+    const a = place(s, SITE, g, -6, z)
+    const b = place(s, SITE, g, 6, z)
+    isoBand(ctx, a, b, z === top && sealT < 1 ? "#aab6d0" : "#7e8cab")
   }
 }
 
@@ -738,8 +794,4 @@ function drawSign(
   if (Math.floor(s.t * 1.6) % 2 === 0) {
     rect(ctx, x - 6, y, 2, 2, color === "#52d273" ? "#52d273" : "#ffd166")
   }
-}
-
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v
 }
