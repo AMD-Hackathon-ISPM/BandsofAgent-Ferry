@@ -10,7 +10,7 @@
 // snapping. Phase chain:
 //   enterSpin → flatten → reveal → hold → conceal → unflatten → exitSpin
 
-import { shipBlitPos, shipBobOffset, type SceneState } from "./scene"
+import { canInspect, shipBlitPos, shipBobOffset, type SceneState } from "./scene"
 import { COLORS, type Sprites } from "./sprites"
 import { BAKED_YAW, BAKED_ZOOM, FERRY_GEOM } from "./voxel/bake"
 import { FERRY_CENTER_3D, FERRY_LX, FERRY_LY, FERRY_LZ } from "./voxel/ferry-model"
@@ -42,13 +42,16 @@ const PAN_MARGIN_X = 72
 const PAN_MARGIN_Y = 48
 const DIM_MAX = 0.65
 
-/** Offscreen buffer for the live voxel render; sized for the max hold zoom. */
-const BUF_W = 640
-const BUF_H = 420
-const MAX_SPIN_ZOOM = 8
+/**
+ * Offscreen buffer for the live voxel render; must fit the flattened ship at
+ * the max cutaway zoom (120 voxels · 6 = 720 px wide, 69 · 6 = 414 tall).
+ */
+const BUF_W = 768
+const BUF_H = 480
+const MAX_SPIN_ZOOM = 3
 /** Wheel-zoom bounds around the layout-derived cutaway zoom. */
-const MIN_CUTAWAY_ZOOM = 4
-const MAX_CUTAWAY_ZOOM = 14
+const MIN_CUTAWAY_ZOOM = 2
+const MAX_CUTAWAY_ZOOM = 6
 
 export type InspectPhase =
   | "enterSpin"
@@ -148,12 +151,12 @@ function homePivot(s: SceneState): { x: number; y: number } {
 }
 
 function spinZoom(s: SceneState): number {
-  return Math.min(MAX_SPIN_ZOOM, Math.max(4, (s.bufW * 0.45) / FERRY_LX))
+  return Math.min(MAX_SPIN_ZOOM, Math.max(1.5, (s.bufW * 0.45) / FERRY_LX))
 }
 
 /** Layout-derived cutaway zoom plus the user's integer wheel offset. */
 function cutawayZoom(s: SceneState, step: number): number {
-  const base = Math.min(12, Math.max(6, Math.floor((s.bufW * 0.8) / FERRY_LX)))
+  const base = Math.min(5, Math.max(3, Math.floor((s.bufW * 0.8) / FERRY_LX)))
   return Math.min(MAX_CUTAWAY_ZOOM, Math.max(MIN_CUTAWAY_ZOOM, base + step))
 }
 
@@ -170,7 +173,7 @@ function cutawayY(s: SceneState): number {
 }
 
 export function enterInspect(s: SceneState) {
-  if (s.mode !== "sea") return
+  if (s.mode !== "sea" || !canInspect(s)) return
   const home = homePivot(s)
   s.mode = "inspect"
   const pose: Pose = {

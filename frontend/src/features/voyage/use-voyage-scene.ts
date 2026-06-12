@@ -3,7 +3,15 @@ import * as React from "react"
 import { usePrefersReducedMotion } from "@/lib/hooks"
 import { bakeSprites } from "./sprites"
 import { bakeDockSprites } from "./dock"
-import { createScene, snapStage, updateScene } from "./scene"
+import { bakeHarborScene, HARBOR_ZOOM } from "./harbor"
+import { bakeFerryAt } from "./voxel/bake"
+import {
+  canInspect,
+  createScene,
+  snapStage,
+  updateScene,
+  type VoyageStage,
+} from "./scene"
 import { drawFrame } from "./render"
 import {
   clampPan,
@@ -30,6 +38,10 @@ export function useVoyageScene(
   options: {
     /** Fires when the ship-inspection mode is entered/left. */
     onInspectChange?: (active: boolean) => void
+    /** Fires whenever the spatial stage changes (dock → depart → sea …). */
+    onStageChange?: (stage: VoyageStage) => void
+    /** Open on the full-screen loading harbor before sailing out. */
+    introDock?: boolean
   } = {}
 ): {
   wrapRef: React.RefObject<HTMLDivElement | null>
@@ -40,11 +52,14 @@ export function useVoyageScene(
   const reduced = usePrefersReducedMotion()
   const voyageRef = React.useRef(voyage)
   const onInspectChangeRef = React.useRef(options.onInspectChange)
+  const onStageChangeRef = React.useRef(options.onStageChange)
+  const introDockRef = React.useRef(options.introDock)
   const stillFrameRef = React.useRef<(() => void) | null>(null)
 
   React.useEffect(() => {
     onInspectChangeRef.current = options.onInspectChange
-  }, [options.onInspectChange])
+    onStageChangeRef.current = options.onStageChange
+  }, [options.onInspectChange, options.onStageChange])
 
   React.useEffect(() => {
     const wrap = wrapRef.current
@@ -55,9 +70,14 @@ export function useVoyageScene(
 
     const sprites = bakeSprites()
     const dock = bakeDockSprites()
+    const harbor = bakeHarborScene()
+    const harborFerry = bakeFerryAt(HARBOR_ZOOM)
     const scene = createScene()
     scene.voyage = voyageRef.current
-    snapStage(scene) // refreshes land directly at dock / sea / destination
+    // A fresh launch plays the loading harbor first; otherwise (refresh, or a
+    // run already underway) land directly in the stage the status implies.
+    // Reduced motion skips the intro entirely.
+    snapStage(scene, { forceDock: Boolean(introDockRef.current) && !reduced })
     if (import.meta.env.DEV) {
       // Dev console hooks: inspect live state and fast-forward the sim
       // deterministically (occluded tabs throttle rAF to ~1fps).
@@ -72,7 +92,7 @@ export function useVoyageScene(
           updateScene(scene, 1 / 60)
           updateInspect(scene, 1 / 60)
         }
-        drawFrame(ctx, scene, sprites, dock)
+        drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
       }
     }
 
@@ -82,6 +102,13 @@ export function useVoyageScene(
       if (active !== lastInspecting) {
         lastInspecting = active
         onInspectChangeRef.current?.(active)
+      }
+    }
+    let lastStage = scene.stage
+    const notifyStage = () => {
+      if (scene.stage !== lastStage) {
+        lastStage = scene.stage
+        onStageChangeRef.current?.(scene.stage)
       }
     }
     scene.onShipClick = () => {
@@ -135,7 +162,7 @@ export function useVoyageScene(
       ctx.imageSmoothingEnabled = false
       scene.bufW = bw
       scene.bufH = bh
-      drawFrame(ctx, scene, sprites, dock)
+      drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
     }
 
     const frame = (ts: number) => {
@@ -146,7 +173,8 @@ export function useVoyageScene(
       updateScene(scene, dt)
       updateInspect(scene, dt)
       notifyInspect()
-      drawFrame(ctx, scene, sprites, dock)
+      notifyStage()
+      drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
     }
     const start = () => {
       if (running) return
@@ -183,7 +211,7 @@ export function useVoyageScene(
         if (!dragMoved && !onShip) leaveInspect()
         return
       }
-      if (onShip) scene.onShipClick?.()
+      if (onShip && canInspect(scene)) scene.onShipClick?.()
     }
 
     // Drag-to-pan while holding the inspection pose.
@@ -250,6 +278,7 @@ export function useVoyageScene(
       if (!p) return
       const r = scene.shipRect
       const interactive =
+        canInspect(scene) &&
         p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
       canvas.style.cursor = interactive ? "pointer" : "default"
     }
@@ -291,7 +320,7 @@ export function useVoyageScene(
       scene.progress = voyageRef.current.target
       snapStage(scene) // no animation loop to play transitions — jump there
       updateScene(scene, 0)
-      drawFrame(ctx, scene, sprites, dock)
+      drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
     }
 
     const ro = new ResizeObserver(resize)

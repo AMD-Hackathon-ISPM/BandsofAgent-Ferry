@@ -45,6 +45,10 @@ export function VoyageView(props: {
   /** Hide the floating ship's log overlay (when it is docked elsewhere). */
   showLog?: boolean
   progressClassName?: string
+  /** Play the full-screen loading harbor before sailing out. */
+  intro?: boolean
+  /** Fires once the ferry has pulled out and reached open water. */
+  onDeparted?: () => void
 }) {
   const {
     run,
@@ -53,11 +57,27 @@ export function VoyageView(props: {
     className,
     showLog = true,
     progressClassName,
+    intro = false,
+    onDeparted,
   } = props
   const voyage = useDebugVoyage(deriveVoyage(run))
   const [inspecting, setInspecting] = React.useState(false)
+  const introRef = React.useRef(intro)
+  const onDepartedRef = React.useRef(onDeparted)
+  React.useEffect(() => {
+    onDepartedRef.current = onDeparted
+  }, [onDeparted])
+  const handleStage = React.useCallback((stage: string) => {
+    // The harbor intro ends the moment the ferry reaches open water.
+    if (introRef.current && stage === "sea") {
+      introRef.current = false
+      onDepartedRef.current?.()
+    }
+  }, [])
   const { wrapRef, canvasRef } = useVoyageScene(voyage, {
     onInspectChange: setInspecting,
+    onStageChange: handleStage,
+    introDock: intro,
   })
 
   return (
@@ -82,19 +102,27 @@ export function VoyageView(props: {
         Drag to pan — scroll to zoom — Esc to return
       </div>
 
-      {voyage.mode === "pending" && !inspecting && (
+      {intro && !inspecting && (
+        <div className="pointer-events-none absolute top-6 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm">
+          Loading the ferry — vehicles boarding, casting off shortly
+        </div>
+      )}
+
+      {!intro && voyage.mode === "pending" && !inspecting && (
         <div className="pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm">
           In queue — cargo loading, the ferry departs when the run starts
         </div>
       )}
 
-      {showLog && (
+      {showLog && !intro && (
         <ShipLog messages={messages} streamedIds={streamedIds} />
       )}
-      {voyage.mode === "arrived" && run.pr && (
+      {!intro && voyage.mode === "arrived" && run.pr && (
         <ArrivalPopup run={run} pr={run.pr} />
       )}
-      <VoyageProgress run={run} voyage={voyage} className={progressClassName} />
+      {!intro && (
+        <VoyageProgress run={run} voyage={voyage} className={progressClassName} />
+      )}
     </section>
   )
 }

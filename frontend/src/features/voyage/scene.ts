@@ -5,6 +5,7 @@ import { SEA_VX, SEA_VY, horizonY } from "./sea"
 import { FERRY_ANCHOR, FERRY_STERN } from "./sprites"
 import type { VoyageStatus } from "./progress"
 import type { InspectState } from "./inspect"
+import { createHarborState, updateHarbor, type HarborState } from "./harbor"
 
 /** "inspect" is the prop-inspection mode entered by clicking the ship. */
 export type SceneMode = "sea" | "inspect"
@@ -36,8 +37,8 @@ export interface SceneState {
   stage: VoyageStage
   /** Seconds in the current stage. */
   stageT: number
-  /** Departure-dock world offset, art px; 0 = berthed, drifts left on depart. */
-  dockX: number
+  /** Harbor→sea cross-fade, 0 = harbor fully shown .. 1 = faded out to sea. */
+  departFade: number
   /** Crane/cargo animation clock, runs while at the loading dock. */
   craneT: number
   /** 0..1 destination-harbor approach (1 = moored alongside). */
@@ -67,6 +68,14 @@ export interface SceneState {
   inspect: InspectState | null
   /** Currently held pan keys (arrows), maintained by the canvas hook. */
   keys: Set<string>
+  /** Loading-harbor vehicle queue + crane animation state. */
+  harbor: HarborState
+  /**
+   * External readiness gate for the loading screen: the harbor holds until
+   * this is true (and the minimum dwell has elapsed). Defaults true so a plain
+   * sea scene never waits on it.
+   */
+  ready: boolean
   onShipClick?: () => void
 }
 
@@ -81,14 +90,17 @@ const SPEED_TARGET: Record<VoyageStatus["mode"], number> = {
 }
 
 /** Ship x-fraction while berthed (dock on the left, bow already pointed out). */
-const BERTH_X = 0.62
+const BERTH_X = 0.6
 /** Ship x-fraction on open water. */
 const SEA_X = 0.5
 const DOOR_DUR = 1.2
-const DEPART_DUR = 4.5
+/** Cross-fade time from the berthed harbor to the open-sea scene. */
+const DEPART_FADE_DUR = 1.1
+/** Beat after the door seals before the cross-fade begins. */
+const DEPART_HOLD = 0.2
 const ARRIVE_DUR = 4
-/** How far the departure dock scrolls before it is fully off-screen. */
-const DOCK_TRAVEL = 420
+/** Minimum seconds the loading harbor is shown before the ferry may depart. */
+export const HARBOR_MIN_DUR = 5
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v
@@ -103,7 +115,7 @@ export function createScene(): SceneState {
     mode: "sea",
     stage: "sea",
     stageT: 0,
-    dockX: 0,
+    departFade: 1,
     craneT: 0,
     arrival: 0,
     shipXFrac: SEA_X,
@@ -133,7 +145,14 @@ export function createScene(): SceneState {
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
     inspect: null,
     keys: new Set(),
+    harbor: createHarborState(),
+    ready: true,
   }
+}
+
+/** Inspection (click-the-ship cutaway) is only offered once at open water. */
+export function canInspect(s: SceneState): boolean {
+  return s.stage === "sea" || s.stage === "arrive" || s.stage === "docked"
 }
 
 /**
@@ -141,12 +160,25 @@ export function createScene(): SceneState {
  * transition animation. Used on mount and for reduced-motion still frames so
  * a refresh lands directly in the right scene.
  */
-export function snapStage(s: SceneState) {
+export function snapStage(s: SceneState, opts?: { forceDock?: boolean }) {
+  // A fresh launch forces the loading harbor even when the run is already
+  // active (dummy runs never report "pending"); the harbor then departs on
+  // its own timer.
+  if (opts?.forceDock && s.voyage.mode !== "arrived") {
+    s.stage = "dock"
+    s.shipXFrac = BERTH_X
+    s.departFade = 0
+    s.doorT = 0
+    s.arrival = 0
+    s.speed = 0
+    s.stageT = 0
+    return
+  }
   switch (s.voyage.mode) {
     case "pending":
       s.stage = "dock"
       s.shipXFrac = BERTH_X
-      s.dockX = 0
+      s.departFade = 0
       s.doorT = 0
       s.arrival = 0
       s.speed = 0
@@ -154,6 +186,7 @@ export function snapStage(s: SceneState) {
     case "arrived":
       s.stage = "docked"
       s.shipXFrac = SEA_X
+      s.departFade = 1
       s.doorT = 1
       s.arrival = 1
       s.speed = 0
@@ -161,6 +194,7 @@ export function snapStage(s: SceneState) {
     default:
       s.stage = "sea"
       s.shipXFrac = SEA_X
+      s.departFade = 1
       s.doorT = 1
       s.arrival = 0
       break
@@ -181,19 +215,23 @@ function updateStage(s: SceneState, dt: number) {
     case "dock":
       s.craneT += dt
       s.shipXFrac = BERTH_X
-      s.dockX = 0
+      s.departFade = 0
       s.doorT = 0
+      // Depart once the run is actually moving AND the loading screen has had
+      // its minimum dwell and any crucial assets are ready (max of the two).
       if (mode === "arrived") snapStage(s)
-      else if (mode !== "pending") setStage(s, "depart")
+      else if (mode !== "pending" && s.stageT >= HARBOR_MIN_DUR && s.ready) {
+        setStage(s, "depart")
+      }
       break
     case "depart": {
-      // The stern door seals first, then the ferry pulls out and the dock
-      // scrolls away behind it.
+      // The stern door seals first; after a beat the big berthed harbor
+      // cross-fades into the smaller open-sea ferry (a cut, not a slide).
       s.doorT = clamp01(s.stageT / DOOR_DUR)
-      const p = easeInOutCubic(clamp01((s.stageT - 0.8) / (DEPART_DUR - 0.8)))
-      s.shipXFrac = BERTH_X + (SEA_X - BERTH_X) * p
-      s.dockX = -DOCK_TRAVEL * p
-      if (s.stageT >= DEPART_DUR) setStage(s, "sea")
+      const fadeStart = DOOR_DUR + DEPART_HOLD
+      s.departFade = easeInOutCubic(clamp01((s.stageT - fadeStart) / DEPART_FADE_DUR))
+      s.shipXFrac = BERTH_X + (SEA_X - BERTH_X) * s.departFade
+      if (s.stageT >= fadeStart + DEPART_FADE_DUR) setStage(s, "sea")
       break
     }
     case "sea":
@@ -230,6 +268,7 @@ export function shipBobOffset(s: SceneState): number {
 export function updateScene(s: SceneState, dt: number) {
   s.t += dt
   updateStage(s, dt)
+  if (s.stage === "dock" || s.stage === "depart") updateHarbor(s, dt)
 
   const ease = Math.min(1, dt * 0.8)
   s.progress += (s.voyage.target - s.progress) * ease

@@ -4,12 +4,13 @@
 // ./interior-art), and finally the silhouette outline. The live voxel shell
 // fades out above this during the reveal.
 
+import { DECKS } from "../voxel/ferry-model"
 import { getHullProfile } from "./hull-profile"
 import { ROOMS } from "./rooms"
 import { paintRoom } from "./interior-art"
 
 /** Model-space pivot z the cutaway camera centers on (mid-silhouette). */
-export const CUTAWAY_PZ = 11.5
+export const CUTAWAY_PZ = 34.5
 
 const BG_STRUCTURE = "#1c2747"
 const WALL = "#0e1730"
@@ -46,7 +47,7 @@ function bakeInterior(zoom: number): HTMLCanvasElement {
   // Deck lines: main deck top and the cabin rooflines, drawn where the
   // structure continues above.
   ctx.fillStyle = DECK_LINE
-  for (const zTop of [p.hullTopZ, 11, 16]) {
+  for (const zTop of [DECKS.hullTop, DECKS.tier1RoofTop, DECKS.tier2RoofTop]) {
     for (let x = 0; x < p.lx; x++) {
       if (occ(p, x, zTop)) ctx.fillRect(cellX(x), cellY(zTop), zoom, 1)
     }

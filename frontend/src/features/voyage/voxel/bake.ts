@@ -42,10 +42,17 @@ export interface FerryGeom {
   cam: VoxelCam
 }
 
-function computeGeom(): FerryGeom {
+/** Ferry sprite geometry (size + registration points) at a given zoom. Pure
+ * projection math, no DOM — the harbor uses it to anchor props to the big
+ * berthed ferry before any baking happens. */
+export function ferryGeomAt(zoom: number = BAKED_ZOOM): FerryGeom {
+  return computeGeom(zoom)
+}
+
+function computeGeom(zoom: number = BAKED_ZOOM): FerryGeom {
   const cam: VoxelCam = {
     yaw: BAKED_YAW,
-    zoom: BAKED_ZOOM,
+    zoom,
     ox: 0,
     oy: 0,
     px: 0,
@@ -100,8 +107,28 @@ export interface FerryBake {
   shadow: HTMLCanvasElement
 }
 
+/** Geometry + sprite frames + contact shadow, all baked at one zoom. */
+export interface FerryBakeAt extends FerryBake {
+  geom: FerryGeom
+}
+
+/**
+ * Bake the ferry at an arbitrary zoom. The loading harbor uses a larger zoom
+ * than the at-sea sprite so its berthed ferry (and the props around it) read
+ * as chunky detailed voxels; the default reproduces the at-sea sprite.
+ */
+export function bakeFerryAt(zoom: number = BAKED_ZOOM): FerryBakeAt {
+  const geom = zoom === BAKED_ZOOM ? FERRY_GEOM : computeGeom(zoom)
+  const bake = bakeFromGeom(geom)
+  return { geom, ...bake }
+}
+
 export function bakeFerrySprites(): FerryBake {
-  const { w, h, cam } = FERRY_GEOM
+  return bakeFromGeom(FERRY_GEOM)
+}
+
+function bakeFromGeom(geom: FerryGeom): FerryBake {
+  const { w, h, cam } = geom
   const t = createVoxelTarget(w, h)
   renderVoxels(t, getFerryModel(), cam, OUTLINE)
 

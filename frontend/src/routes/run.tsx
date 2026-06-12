@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useLocation, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
@@ -160,6 +160,25 @@ function RunReady({
   const [rightOpen, setRightOpen] = React.useState(true)
   const isXL = useMediaQuery("(min-width: 1280px)")
 
+  // Full-screen loading harbor: shown on a fresh launch (or a genuinely
+  // pending run) until the ferry sails out, then the control panels fade in.
+  const location = useLocation()
+  const justLaunched = Boolean(
+    (location.state as { justLaunched?: boolean } | null)?.justLaunched
+  )
+  const introKey = `ferry-harbor-played-${run.id}`
+  const [phase, setPhase] = React.useState<"loading" | "normal">(() =>
+    run.status === "pending" ||
+    (justLaunched && sessionStorage.getItem(introKey) !== "1")
+      ? "loading"
+      : "normal"
+  )
+  const loading = phase === "loading"
+  const onDeparted = React.useCallback(() => {
+    sessionStorage.setItem(introKey, "1")
+    setPhase("normal")
+  }, [introKey])
+
   const handleAction = React.useCallback(() => {
     setPane("outputs")
     requestAnimationFrame(() => {
@@ -216,21 +235,32 @@ function RunReady({
       selectedAgent={selectedAgent}
       onSelectAgent={setSelectedAgent}
       showLog={!isXL}
+      intro={loading}
+      onDeparted={onDeparted}
     />
   )
 
   return (
     <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
-      <RunHeader
-        run={liveRun}
-        role={role}
-        now={now}
-        dbApproved={dbApproved}
-        selectedPhase={selectedPhase}
-        onSelectPhase={setSelectedPhase}
-      />
+      <div
+        className={cn(
+          "shrink-0 transition-all duration-700 ease-out",
+          loading
+            ? "pointer-events-none max-h-0 -translate-y-4 opacity-0"
+            : "max-h-[16rem] opacity-100"
+        )}
+      >
+        <RunHeader
+          run={liveRun}
+          role={role}
+          now={now}
+          dbApproved={dbApproved}
+          selectedPhase={selectedPhase}
+          onSelectPhase={setSelectedPhase}
+        />
 
-      <RunBanner run={liveRun} onAction={handleAction} />
+        <RunBanner run={liveRun} onAction={handleAction} />
+      </div>
 
       {isXL ? (
         <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -242,7 +272,11 @@ function RunReady({
             badge={activeAgents > 0 ? String(activeAgents) : undefined}
             open={leftOpen}
             onOpenChange={setLeftOpen}
-            className="w-72"
+            className={cn(
+              "w-72 transition-[opacity,transform] duration-700",
+              loading &&
+                "pointer-events-none -translate-x-[calc(100%+0.75rem)] opacity-0"
+            )}
           >
             <div className="min-h-0 flex-1 overflow-hidden">{roster}</div>
             <ShipLog messages={messages} streamedIds={streamedIds} docked />
@@ -256,12 +290,21 @@ function RunReady({
             }
             open={rightOpen}
             onOpenChange={setRightOpen}
-            className="w-80"
+            className={cn(
+              "w-80 transition-[opacity,transform] duration-700",
+              loading &&
+                "pointer-events-none translate-x-[calc(100%+0.75rem)] opacity-0"
+            )}
           >
             {outputs}
           </FolderPanel>
 
-          <div className="absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-card/85 px-1.5 py-1 shadow-lg backdrop-blur-md">
+          <div
+            className={cn(
+              "absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-card/85 px-1.5 py-1 shadow-lg backdrop-blur-md transition-opacity duration-700",
+              loading && "pointer-events-none opacity-0"
+            )}
+          >
             <CenterToggle
               active={centerView === "voyage"}
               onClick={() => setCenterView("voyage")}
@@ -311,7 +354,12 @@ function RunReady({
             onValueChange={setPane}
             className="flex min-h-0 flex-1 flex-col gap-0"
           >
-            <TabsList className="m-2 self-start">
+            <TabsList
+              className={cn(
+                "m-2 self-start transition-opacity duration-700",
+                loading && "pointer-events-none opacity-0"
+              )}
+            >
               <TabsTrigger value="voyage">Voyage</TabsTrigger>
               <TabsTrigger value="feed">Band room</TabsTrigger>
               <TabsTrigger value="band">The band</TabsTrigger>

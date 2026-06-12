@@ -194,7 +194,7 @@ export function RepoLauncher({ className }: { className?: string }) {
       toast.success("Migration launched", {
         description: `${repo.owner}/${repo.name}@${branch} → ${target === "go" ? "Go" : "Rust"}. Assembling the band.`,
       })
-      navigate(`/runs/${result.id}`)
+      navigate(`/runs/${result.id}`, { state: { justLaunched: true } })
     } catch (err) {
       toast.error("Failed to launch migration", {
         description: err instanceof Error ? err.message : "Something went wrong.",
