@@ -1,11 +1,17 @@
 // Voyage scene state + simulation step. All of this lives in refs and is
 // mutated by the render loop — React never re-renders per frame.
 
-import { SEA_VX, SEA_VY, horizonY } from "./sea"
+import { SEA_VX, SEA_VY } from "./sea"
 import { FERRY_ANCHOR, FERRY_STERN } from "./sprites"
 import type { VoyageStatus } from "./progress"
 import type { InspectState } from "./inspect"
-import { createHarborState, updateHarbor, type HarborState } from "./harbor"
+import {
+  createHarborState,
+  departShipOffscreen,
+  destApproachStartG,
+  updateHarbor,
+  type HarborState,
+} from "./harbor"
 
 /** "inspect" is the prop-inspection mode entered by clicking the ship. */
 export type SceneMode = "sea" | "inspect"
@@ -26,12 +32,6 @@ export interface Particle {
   life: number
 }
 
-export interface CloudInst {
-  x: number
-  y: number
-  idx: number
-}
-
 export interface SceneState {
   mode: SceneMode
   stage: VoyageStage
@@ -39,10 +39,21 @@ export interface SceneState {
   stageT: number
   /** Harbor→sea cross-fade, 0 = harbor fully shown .. 1 = faded out to sea. */
   departFade: number
-  /** Crane/cargo animation clock, runs while at the loading dock. */
-  craneT: number
-  /** 0..1 destination-harbor approach (1 = moored alongside). */
-  arrival: number
+  /** Sea→destination-harbor cross-fade, 0 = open sea .. 1 = harbor shown. */
+  arriveFade: number
+  /**
+   * Big berthed ferry's slide along its heading, in ground units (+gx =
+   * up-right). 0 = berthed; departure drives it positive, the destination
+   * approach starts deep negative and eases to 0.
+   */
+  shipG: number
+  /** Departure speed integrator for the sail-away, ground units/s. */
+  shipV: number
+  /**
+   * At-sea entry, 0 = ship still off the bottom-left edge .. 1 = locked at
+   * the screen center. Driven only by the depart→sea handoff; snaps to 1.
+   */
+  seaEnter: number
   /** Eased ship x as a fraction of the buffer width. */
   shipXFrac: number
   /** Stern loading door, 0 open .. 1 sealed. */
@@ -59,16 +70,13 @@ export interface SceneState {
   voyage: VoyageStatus
   wake: Particle[]
   wakeTimer: number
-  clouds: CloudInst[]
-  bird: { x: number; baseY: number; phase: number } | null
-  birdTimer: number
   /** Ship blit rect in art px, refreshed by render; used for click hit-tests. */
   shipRect: { x: number; y: number; w: number; h: number }
   /** Live prop-inspection state while mode === "inspect". */
   inspect: InspectState | null
   /** Currently held pan keys (arrows), maintained by the canvas hook. */
   keys: Set<string>
-  /** Loading-harbor vehicle queue + crane animation state. */
+  /** Loading-harbor vehicle queue state. */
   harbor: HarborState
   /**
    * External readiness gate for the loading screen: the harbor holds until
@@ -89,16 +97,22 @@ const SPEED_TARGET: Record<VoyageStatus["mode"], number> = {
   blocked: 0.3,
 }
 
-/** Ship x-fraction while berthed (dock on the left, bow already pointed out). */
-const BERTH_X = 0.6
 /** Ship x-fraction on open water. */
 const SEA_X = 0.5
 const DOOR_DUR = 1.2
-/** Cross-fade time from the berthed harbor to the open-sea scene. */
-const DEPART_FADE_DUR = 1.1
-/** Beat after the door seals before the cross-fade begins. */
-const DEPART_HOLD = 0.2
-const ARRIVE_DUR = 4
+/** Beat after the door seals before the ship starts pulling out. */
+const DEPART_HOLD = 0.3
+/** Sail-away top speed, ground units/s. */
+const DEPART_SPEED = 90
+/** Fade of the (now shipless) harbor once the ferry has cleared the screen. */
+const DEPART_FADE_DUR = 0.6
+/** Empty-ocean beat before the at-sea ferry enters from the bottom-left. */
+const SEA_ENTER_HOLD = 0.7
+const SEA_ENTER_DUR = 2
+/** Cross-fade into the destination scene at the start of the arrive stage. */
+const ARRIVE_FADE_DUR = 0.5
+/** Approach slide from off-screen to the destination berth. */
+const ARRIVE_SLIDE_DUR = 4
 /** Minimum seconds the loading harbor is shown before the ferry may depart. */
 export const HARBOR_MIN_DUR = 5
 
@@ -110,14 +124,20 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3)
+}
+
 export function createScene(): SceneState {
   return {
     mode: "sea",
     stage: "sea",
     stageT: 0,
     departFade: 1,
-    craneT: 0,
-    arrival: 0,
+    arriveFade: 0,
+    shipG: 0,
+    shipV: 0,
+    seaEnter: 1,
     shipXFrac: SEA_X,
     doorT: 1,
     t: 0,
@@ -135,13 +155,6 @@ export function createScene(): SceneState {
     },
     wake: [],
     wakeTimer: 0,
-    clouds: [
-      { x: 45, y: 12, idx: 0 },
-      { x: 270, y: 33, idx: 1 },
-      { x: 480, y: 21, idx: 2 },
-    ],
-    bird: null,
-    birdTimer: 12,
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
     inspect: null,
     keys: new Set(),
@@ -152,7 +165,7 @@ export function createScene(): SceneState {
 
 /** Inspection (click-the-ship cutaway) is only offered once at open water. */
 export function canInspect(s: SceneState): boolean {
-  return s.stage === "sea" || s.stage === "arrive" || s.stage === "docked"
+  return s.stage === "sea" && s.seaEnter >= 1
 }
 
 /**
@@ -165,40 +178,47 @@ export function snapStage(s: SceneState, opts?: { forceDock?: boolean }) {
   // active (dummy runs never report "pending"); the harbor then departs on
   // its own timer.
   if (opts?.forceDock && s.voyage.mode !== "arrived") {
-    s.stage = "dock"
-    s.shipXFrac = BERTH_X
-    s.departFade = 0
-    s.doorT = 0
-    s.arrival = 0
-    s.speed = 0
-    s.stageT = 0
+    snapDock(s)
     return
   }
   switch (s.voyage.mode) {
     case "pending":
-      s.stage = "dock"
-      s.shipXFrac = BERTH_X
-      s.departFade = 0
-      s.doorT = 0
-      s.arrival = 0
-      s.speed = 0
-      break
+      snapDock(s)
+      return
     case "arrived":
       s.stage = "docked"
-      s.shipXFrac = SEA_X
+      s.shipG = 0
+      s.shipV = 0
       s.departFade = 1
+      s.arriveFade = 1
+      s.seaEnter = 1
       s.doorT = 1
-      s.arrival = 1
       s.speed = 0
       break
     default:
       s.stage = "sea"
-      s.shipXFrac = SEA_X
+      s.shipG = 0
+      s.shipV = 0
       s.departFade = 1
+      s.arriveFade = 0
+      s.seaEnter = 1
       s.doorT = 1
-      s.arrival = 0
       break
   }
+  s.shipXFrac = SEA_X
+  s.stageT = 0
+}
+
+function snapDock(s: SceneState) {
+  s.stage = "dock"
+  s.shipG = 0
+  s.shipV = 0
+  s.departFade = 0
+  s.arriveFade = 0
+  s.seaEnter = 1
+  s.doorT = 0
+  s.speed = 0
+  s.shipXFrac = SEA_X
   s.stageT = 0
 }
 
@@ -213,8 +233,8 @@ function updateStage(s: SceneState, dt: number) {
 
   switch (s.stage) {
     case "dock":
-      s.craneT += dt
-      s.shipXFrac = BERTH_X
+      s.shipG = 0
+      s.shipV = 0
       s.departFade = 0
       s.doorT = 0
       // Depart once the run is actually moving AND the loading screen has had
@@ -225,37 +245,69 @@ function updateStage(s: SceneState, dt: number) {
       }
       break
     case "depart": {
-      // The stern door seals first; after a beat the big berthed harbor
-      // cross-fades into the smaller open-sea ferry (a cut, not a slide).
+      // The stern door seals and the ramp stows; after a beat the ferry
+      // pulls out along its heading and exits up-right off-screen, then the
+      // shipless harbor fades into the open sea.
       s.doorT = clamp01(s.stageT / DOOR_DUR)
-      const fadeStart = DOOR_DUR + DEPART_HOLD
-      s.departFade = easeInOutCubic(clamp01((s.stageT - fadeStart) / DEPART_FADE_DUR))
-      s.shipXFrac = BERTH_X + (SEA_X - BERTH_X) * s.departFade
-      if (s.stageT >= fadeStart + DEPART_FADE_DUR) setStage(s, "sea")
+      if (s.stageT >= DOOR_DUR + DEPART_HOLD) {
+        s.shipV = Math.min(DEPART_SPEED, s.shipV + DEPART_SPEED * dt * 0.9)
+        s.shipG += s.shipV * dt
+      }
+      if (departShipOffscreen(s)) {
+        s.departFade = clamp01(s.departFade + dt / DEPART_FADE_DUR)
+        if (s.departFade >= 1) {
+          setStage(s, "sea")
+          s.seaEnter = 0
+          s.shipG = 0
+          s.shipV = 0
+        }
+      }
       break
     }
     case "sea":
-      if (mode === "arrived") setStage(s, "arrive")
-      else if (mode === "pending") snapStage(s)
+      // Entry from departure: a beat of empty ocean, then the ferry slides
+      // in from the bottom-left and locks at the screen center.
+      if (s.seaEnter < 1) {
+        s.seaEnter = clamp01((s.stageT - SEA_ENTER_HOLD) / SEA_ENTER_DUR)
+      }
+      if (mode === "arrived") {
+        setStage(s, "arrive")
+        s.arriveFade = 0
+        s.shipG = destApproachStartG(s)
+      } else if (mode === "pending") snapStage(s)
       break
-    case "arrive":
-      if (s.stageT >= ARRIVE_DUR) setStage(s, "docked")
+    case "arrive": {
+      // Cross-fade the small at-sea ferry into the destination harbor scene,
+      // where the big ferry approaches from off the bottom-left and moors.
+      s.arriveFade = clamp01(s.stageT / ARRIVE_FADE_DUR)
+      const start = destApproachStartG(s)
+      const p = clamp01((s.stageT - ARRIVE_FADE_DUR) / ARRIVE_SLIDE_DUR)
+      s.shipG = start * (1 - easeOutCubic(p))
+      if (p >= 1) {
+        setStage(s, "docked")
+        s.shipG = 0
+      }
       break
+    }
     case "docked":
+      s.shipG = 0
+      s.arriveFade = 1
       if (mode === "sailing") snapStage(s)
       else if (mode === "pending") snapStage(s)
       break
   }
 }
 
-/** Top-left blit position keeping the ferry centered (a touch below middle). */
+/** Top-left blit position of the at-sea ferry (center, entering from the
+ *  bottom-left along the iso heading while seaEnter < 1). */
 export function shipBlitPos(s: SceneState): { x: number; y: number } {
   const underway = s.voyage.mode === "sailing" ? 1 : 0
   const surge = Math.round(Math.sin(s.t * 0.9) * 2 * underway)
   const heave = Math.round(Math.sin(s.t * 0.7) * underway)
+  const enter = (1 - easeInOutCubic(s.seaEnter)) * s.bufW * 0.4
   return {
-    x: Math.floor(s.bufW * s.shipXFrac - FERRY_ANCHOR.x + surge),
-    y: Math.floor(s.bufH * 0.55 - FERRY_ANCHOR.y + heave),
+    x: Math.floor(s.bufW * s.shipXFrac - FERRY_ANCHOR.x + surge - enter * 2),
+    y: Math.floor(s.bufH * 0.55 - FERRY_ANCHOR.y + heave + enter),
   }
 }
 
@@ -277,24 +329,22 @@ export function updateScene(s: SceneState, dt: number) {
   else if (s.stage === "arrive") speedTarget = 0.1
   s.speed += (speedTarget - s.speed) * Math.min(1, dt * 1.5)
 
-  // Destination harbor: peeks over the horizon late in the voyage, then
-  // closes alongside during the arrive stage.
-  const arrivalTarget =
-    s.stage === "arrive" || s.stage === "docked"
-      ? 1
-      : s.stage === "sea" && s.voyage.mode === "sailing" && s.progress > 0.9
-        ? Math.min(0.5, (s.progress - 0.9) * 5)
-        : 0
-  s.arrival += (arrivalTarget - s.arrival) * Math.min(1, dt * 0.9)
-
   // Water drifts down-left, opposite the bow heading (up-right).
   s.scrollX += SEA_VX * s.speed * dt
   s.scrollY -= SEA_VY * s.speed * dt
 
   // Wake foam shed at the stern while the ship has way on (and is actually
-  // in the water — not while it's lifted out for inspection).
+  // in the water — not while it's lifted out for inspection, and only once
+  // the at-sea ferry is on stage).
   s.wakeTimer -= dt
-  if (s.mode === "sea" && s.speed > 0.3 && s.wakeTimer <= 0 && s.bufW > 0) {
+  const seaShipShown = s.stage === "sea" && s.seaEnter > 0
+  if (
+    s.mode === "sea" &&
+    seaShipShown &&
+    s.speed > 0.3 &&
+    s.wakeTimer <= 0 &&
+    s.bufW > 0
+  ) {
     s.wakeTimer = 0.12
     const pos = shipBlitPos(s)
     const n = 1 + (Math.random() < 0.4 ? 1 : 0)
@@ -319,30 +369,5 @@ export function updateScene(s: SceneState, dt: number) {
     }
     p.x += p.vx * dt
     p.y += p.vy * dt
-  }
-
-  // Clouds: far parallax, ~0.3× sea speed.
-  for (const c of s.clouds) {
-    c.x -= (SEA_VX * 0.3 * s.speed + 2.25) * dt
-    if (c.x < -60) {
-      c.x = s.bufW + 30 + Math.random() * 90
-      c.y = 6 + Math.random() * Math.max(12, horizonY(s.bufH) - 27)
-    }
-  }
-
-  // The occasional passing bird.
-  if (s.bird) {
-    s.bird.x += 24 * dt
-    if (s.bird.x > s.bufW + 15) s.bird = null
-  } else {
-    s.birdTimer -= dt
-    if (s.birdTimer <= 0 && s.bufH > 0) {
-      s.birdTimer = 14 + Math.random() * 16
-      s.bird = {
-        x: -12,
-        baseY: 9 + Math.random() * Math.max(9, horizonY(s.bufH) * 0.6),
-        phase: Math.random() * Math.PI * 2,
-      }
-    }
   }
 }

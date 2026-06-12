@@ -3,20 +3,15 @@
 // (tone ramps + checkerboard dither) — nothing is lit at runtime, so drawing
 // a "shaded" sprite costs the same as a flat one.
 
-import { makeHorizonHaze, makeWaveTiles, makeWhitecaps, type WaveTiles } from "./sea"
+import { makeWaveTiles, makeWhitecaps, type WaveTiles } from "./sea"
 import { bakeFerrySprites, FERRY_GEOM } from "./voxel/bake"
 import { getFerryModel } from "./voxel/ferry-model"
-import { bakeBirdSprites, bakeCloudSprites } from "./voxel/sky-models"
 import type { VoxelModel } from "./voxel/voxel-grid"
 
 export const COLORS = {
-  sky: "#111a33",
-  horizon: "#2e3f68",
   seaBase: "#15223f",
   shadow: "#0b1428",
   outline: "#0e1730",
-  star: "#33446f",
-  starBright: "#6a82b8",
 }
 
 export interface SpriteDef {
@@ -58,7 +53,6 @@ export const FERRY_ANCHOR = FERRY_GEOM.anchor
 export const FERRY_STERN = FERRY_GEOM.stern
 
 // --- Hand-authored string sprites ------------------------------------------
-// (Clouds and birds are voxel models now — see voxel/sky-models.ts.)
 
 const FOAM_PAL = { f: "#dfe9fb", g: "#8fa3cf" }
 
@@ -68,26 +62,7 @@ const FOAM_FRAMES: SpriteDef[] = [
   { palette: FOAM_PAL, rows: ["g.g.g", ".g.g."] },
 ]
 
-const MOON: SpriteDef = {
-  palette: { m: "#aab9dd", d: "#8294bd" },
-  rows: [
-    "....mmmmm....",
-    "..mmmmmmmmm..",
-    ".mmmmmmmmmmm.",
-    ".mmmmmmmdmmm.",
-    "mmmdmmmmmmmmm",
-    "mmmmmmmmmdmmm",
-    "mmdmmmmmmmmmm",
-    "mmmmmmdmmmmmm",
-    "mmmmmmmmmmmmm",
-    ".mmdmmmmmdmm.",
-    ".mmmmmmmmmmm.",
-    "..mmmmmmmmm..",
-    "....mmmmm....",
-  ],
-}
-
-// --- Pixel-art drawing helpers (shared with the dock scene) -----------------
+// --- Pixel-art drawing helpers (shared with the harbor scene) ----------------
 
 export function makeArtCanvas(
   w: number,
@@ -136,12 +111,8 @@ export interface Sprites {
   ferryShadow: HTMLCanvasElement
   /** Surface voxels of the ferry, for the live inspect-mode renderer. */
   ferryModel: VoxelModel
-  clouds: HTMLCanvasElement[]
-  birds: HTMLCanvasElement[]
   foam: HTMLCanvasElement[]
-  moon: HTMLCanvasElement
   waves: WaveTiles
-  horizonHaze: HTMLCanvasElement
   whitecaps: HTMLCanvasElement[]
 }
 
@@ -151,12 +122,8 @@ export function bakeSprites(): Sprites {
     ferry: ferryBake.frames,
     ferryShadow: ferryBake.shadow,
     ferryModel: getFerryModel(),
-    clouds: bakeCloudSprites(),
-    birds: bakeBirdSprites(),
     foam: FOAM_FRAMES.map(bakeSprite),
-    moon: bakeSprite(MOON),
     waves: makeWaveTiles(),
-    horizonHaze: makeHorizonHaze(),
     whitecaps: makeWhitecaps(),
   }
 }

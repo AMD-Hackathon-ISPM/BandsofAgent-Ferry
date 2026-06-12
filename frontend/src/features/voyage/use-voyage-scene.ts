@@ -2,7 +2,6 @@ import * as React from "react"
 
 import { usePrefersReducedMotion } from "@/lib/hooks"
 import { bakeSprites } from "./sprites"
-import { bakeDockSprites } from "./dock"
 import { bakeHarborScene, HARBOR_ZOOM } from "./harbor"
 import { bakeFerryAt } from "./voxel/bake"
 import {
@@ -69,7 +68,6 @@ export function useVoyageScene(
     if (!ctx) return
 
     const sprites = bakeSprites()
-    const dock = bakeDockSprites()
     const harbor = bakeHarborScene()
     const harborFerry = bakeFerryAt(HARBOR_ZOOM)
     const scene = createScene()
@@ -92,7 +90,7 @@ export function useVoyageScene(
           updateScene(scene, 1 / 60)
           updateInspect(scene, 1 / 60)
         }
-        drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
+        drawFrame(ctx, scene, sprites, harbor, harborFerry)
       }
     }
 
@@ -162,7 +160,7 @@ export function useVoyageScene(
       ctx.imageSmoothingEnabled = false
       scene.bufW = bw
       scene.bufH = bh
-      drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
+      drawFrame(ctx, scene, sprites, harbor, harborFerry)
     }
 
     const frame = (ts: number) => {
@@ -174,7 +172,7 @@ export function useVoyageScene(
       updateInspect(scene, dt)
       notifyInspect()
       notifyStage()
-      drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
+      drawFrame(ctx, scene, sprites, harbor, harborFerry)
     }
     const start = () => {
       if (running) return
@@ -320,7 +318,7 @@ export function useVoyageScene(
       scene.progress = voyageRef.current.target
       snapStage(scene) // no animation loop to play transitions — jump there
       updateScene(scene, 0)
-      drawFrame(ctx, scene, sprites, dock, harbor, harborFerry)
+      drawFrame(ctx, scene, sprites, harbor, harborFerry)
     }
 
     const ro = new ResizeObserver(resize)

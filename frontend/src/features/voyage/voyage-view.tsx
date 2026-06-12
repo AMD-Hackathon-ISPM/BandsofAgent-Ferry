@@ -87,7 +87,7 @@ export function VoyageView(props: {
     >
       <div
         ref={wrapRef}
-        className="absolute inset-0 overflow-hidden bg-[#111a33]"
+        className="absolute inset-0 overflow-hidden bg-[#15223f]"
       >
         <canvas ref={canvasRef} className="pixel-canvas block" />
       </div>

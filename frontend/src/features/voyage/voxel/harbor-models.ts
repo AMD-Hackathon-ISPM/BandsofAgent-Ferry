@@ -1,5 +1,5 @@
-// Voxel models for the night loading-harbor: quay slab, terminal, lamps,
-// trees, container units, gantry crane, tugboat, boarding vehicles and
+// Voxel models for the night loading-harbor: quay slab (with painted roads
+// and a marked parking lot), terminal, lamps, trees, boarding vehicles and
 // bollards. Each is authored in local model space (x,y,z) and baked to an iso
 // sprite by iso-bake.ts so it shares the ferry's heading and shading.
 //
@@ -7,14 +7,6 @@
 // glow (#f2c14e) and the indigo accent (#4f6bff) carried from the ferry.
 
 import { VoxelGrid, type VoxelModel } from "./voxel-grid"
-
-export const CONTAINER_COLORS = [
-  "#4f6bff",
-  "#f2c14e",
-  "#58bfd5",
-  "#6ee7a8",
-  "#d08a9e",
-]
 
 export type VehicleKind = "car" | "van" | "truck" | "bus"
 
@@ -38,31 +30,69 @@ const QUAY_PALETTE = [
   "#283755", // 4 asphalt apron
   "#46588a", // 5 painted bay line
   "#3d4d78", // 6 apron seam
+  "#202b46", // 7 road asphalt
+  "#8e9cbd", // 8 road marking
 ]
 
+/** Painted road network + parking lot, all in quay-local voxel coords. */
+export interface QuayRoads {
+  /** Local y of the boarding-lane road centerline. */
+  laneY: number
+  /** Local x range the boarding-lane road spans. */
+  laneX0: number
+  laneX1: number
+  /** Local x of the entry road centerline (runs from the lane to the far edge). */
+  entryX: number
+  /** Road half-width. */
+  halfW: number
+  /** Marked parking lot rects with bay-line pitch along x. */
+  lots: Array<{ x0: number; x1: number; y0: number; y1: number; pitch: number }>
+}
+
 /**
- * Flat concrete quay, `lx`×`ly` footprint, 3 voxels thick. The central asphalt
- * apron carries painted parking-bay lines so rows of cars read as a marked lot;
- * `bayPitch` is the spacing (ground units) between the dividing lines along x.
+ * Flat concrete quay, `lx`×`ly` footprint, 3 voxels thick, with a painted
+ * boarding-lane road, an entry road coming in from the far (off-screen) edge,
+ * a dashed centerline on both, a stop line at their T-intersection, and a
+ * marked parking lot.
  */
-export function quayModel(lx: number, ly: number, bayPitch = 13): VoxelModel {
+export function quayModel(lx: number, ly: number, roads: QuayRoads): VoxelModel {
   const g = new VoxelGrid(lx, ly, 3)
-  // Where the asphalt apron sits, inset from the concrete rim.
   const rimX0 = 4
   const rimX1 = lx - 5
   const rimY0 = 4
   const rimY1 = ly - 5
-  // A central drive aisle splits two banks of bays (low-y and high-y).
-  const aisle0 = Math.round(ly * 0.46)
-  const aisle1 = Math.round(ly * 0.6)
+  const { laneY, laneX0, laneX1, entryX, halfW, lots } = roads
   g.box(0, lx - 1, 0, ly - 1, 0, 2, (x, y, z) => {
     if (z === 2) {
       const rim = x < rimX0 || x > rimX1 || y < rimY0 || y > rimY1
       if (rim) return 1
-      // Bay divider lines, perpendicular to the aisle, skipping the aisle band.
-      const inAisle = y >= aisle0 && y <= aisle1
-      if (!inAisle && (x - rimX0) % bayPitch === 0) return 5
-      // A faint seam down the centre of each bay bank for asphalt texture.
+      const onLane = Math.abs(y - laneY) <= halfW && x >= laneX0 && x <= laneX1
+      const onEntry = Math.abs(x - entryX) <= halfW && y >= laneY
+      if (onLane || onEntry) {
+        // Stop line across the entry road just before the intersection.
+        if (
+          onEntry &&
+          y >= laneY + halfW + 1 &&
+          y <= laneY + halfW + 2 &&
+          Math.abs(x - entryX) <= halfW - 1
+        ) {
+          return 8
+        }
+        // Dashed centerlines.
+        if (onLane && y === laneY && x % 6 < 3) return 8
+        if (onEntry && x === entryX && y > laneY + halfW + 4 && y % 6 < 3) {
+          return 8
+        }
+        return 7
+      }
+      // Marked parking bays.
+      for (const lot of lots) {
+        if (x >= lot.x0 && x <= lot.x1 && y >= lot.y0 && y <= lot.y1) {
+          if ((x - lot.x0) % lot.pitch === 0) return 5
+          return (x + y) % 9 === 0 ? 6 : 4
+        }
+      }
+      // A faint seam across the open apron for asphalt texture.
       if ((x + y) % 9 === 0) return 6
       return 4
     }
@@ -157,85 +187,6 @@ export function treeModel(seed: number): VoxelModel {
   return g.extract(TREE_PALETTE)
 }
 
-// --- Container unit --------------------------------------------------------
-
-export function containerModel(colorIdx: number): VoxelModel {
-  const palette = [
-    "#000000",
-    CONTAINER_COLORS[colorIdx % CONTAINER_COLORS.length],
-    "#0e1730", // 2 rib shadow
-    "#f4f7fd", // 3 top edge
-  ]
-  const lx = 12
-  const ly = 5
-  const lz = 5
-  const g = new VoxelGrid(lx, ly, lz)
-  g.box(0, lx - 1, 0, ly - 1, 0, lz - 1, (x, _y, z) => {
-    if (z === lz - 1) return 3
-    return x % 2 === 0 ? 2 : 1
-  })
-  return g.extract(palette)
-}
-
-// --- Gantry crane ----------------------------------------------------------
-
-const CRANE_PALETTE = [
-  "#000000",
-  "#c49a4b", // 1 frame
-  "#8a6a45", // 2 frame dark
-  "#2c3d6b", // 3 cab
-  "#65d6ff", // 4 cab glass
-  "#8e9cbd", // 5 rail
-]
-
-export function craneModel(): VoxelModel {
-  const lx = 50
-  const ly = 8
-  const lz = 40
-  const g = new VoxelGrid(lx, ly, lz)
-  // Two A-frame legs.
-  for (const lxpos of [4, 44]) {
-    g.box(lxpos, lxpos + 1, 1, 2, 0, lz - 5, 1)
-    g.box(lxpos, lxpos + 1, ly - 3, ly - 2, 0, lz - 5, 2)
-  }
-  // Top portal beam spanning the legs, reaching out over the berth.
-  g.box(0, lx - 1, 1, 2, lz - 5, lz - 3, 1)
-  g.box(0, lx - 1, 1, 2, lz - 3, lz - 3, 5)
-  // Trolley cab hanging under the beam.
-  g.box(22, 30, 0, 3, lz - 8, lz - 5, 3)
-  g.box(23, 29, 0, 0, lz - 7, lz - 6, 4)
-  return g.extract(CRANE_PALETTE)
-}
-
-// --- Tugboat ---------------------------------------------------------------
-
-const TUG_PALETTE = [
-  "#000000",
-  "#b4502a", // 1 hull
-  "#7a3219", // 2 hull dark
-  "#2a3a63", // 3 cabin
-  "#f2c14e", // 4 cabin light
-  "#e8edf8", // 5 deck
-]
-
-export function tugboatModel(): VoxelModel {
-  const lx = 20
-  const ly = 9
-  const lz = 10
-  const g = new VoxelGrid(lx, ly, lz)
-  // Hull.
-  g.box(0, lx - 1, 1, ly - 2, 0, 3, (x, _y, z) =>
-    z === 3 ? 5 : x < 3 || x > lx - 3 ? 2 : 1
-  )
-  // Wheelhouse.
-  g.box(6, 13, 2, ly - 3, 4, 8, (x, _y, z) =>
-    z >= 5 && z <= 6 && x > 6 && x < 13 ? 4 : 3
-  )
-  // Stack.
-  g.box(14, 15, 4, 5, 4, 7, 2)
-  return g.extract(TUG_PALETTE)
-}
-
 // --- Vehicles --------------------------------------------------------------
 
 const VEHICLE_BODY = [
@@ -249,13 +200,43 @@ const VEHICLE_BODY = [
   "#8a6bff", // violet
 ]
 
+/** Vehicle length (voxels along the driving axis) per kind. */
+export function vehicleLength(kind: VehicleKind): number {
+  if (kind === "car") return 15
+  if (kind === "van") return 17
+  return 22
+}
+
+/**
+ * Rotate a grid a quarter turn about z so a model authored driving along +x
+ * drives along −y instead (nose toward low y): (x, y) → (y, lx−1−x).
+ */
+function rotateZToNegY(g: VoxelGrid): VoxelGrid {
+  const r = new VoxelGrid(g.ly, g.lx, g.lz)
+  for (let z = 0; z < g.lz; z++) {
+    for (let y = 0; y < g.ly; y++) {
+      for (let x = 0; x < g.lx; x++) {
+        const c = g.get(x, y, z)
+        if (c) r.set(y, g.lx - 1 - x, z, c)
+      }
+    }
+  }
+  return r
+}
+
 /**
  * A boarding vehicle, authored along +x as the forward (driving) direction;
  * headlights sit at the high-x nose, tail-lights at the stern. `seed` picks a
- * body colour. Authored at ~1.6× the old resolution so the bigger harbor zoom
- * shows wheel arches, mirrors, raked glass and a bumper instead of a blob.
+ * body colour. `heading` "-y" bakes the same vehicle a quarter turn around z
+ * (driving toward low y — up-left on screen — with its nose at the model's
+ * y = 0 origin edge). Authored at ~1.6× the old resolution so the bigger
+ * harbor zoom shows wheel arches, mirrors, raked glass and a bumper.
  */
-export function vehicleModel(kind: VehicleKind, seed: number): VoxelModel {
+export function vehicleModel(
+  kind: VehicleKind,
+  seed: number,
+  heading: "x" | "-y" = "x"
+): VoxelModel {
   const body = VEHICLE_BODY[seed % VEHICLE_BODY.length]
   const palette = [
     "#000000",
@@ -267,22 +248,13 @@ export function vehicleModel(kind: VehicleKind, seed: number): VoxelModel {
     "#aeb9d6", // 6 roof / panel hi
     "#2a3656", // 7 bumper / trim dark
   ]
-  let lx: number
-  let lz: number
+  const lx = vehicleLength(kind)
   const ly = 7
-  if (kind === "car") {
-    lx = 15
-    lz = 6
-  } else if (kind === "van") {
-    lx = 17
-    lz = 9
-  } else if (kind === "bus") {
-    lx = 22
-    lz = 9
-  } else {
-    lx = 22
-    lz = 10
-  }
+  let lz: number
+  if (kind === "car") lz = 6
+  else if (kind === "van") lz = 9
+  else if (kind === "bus") lz = 9
+  else lz = 10
   const g = new VoxelGrid(lx, ly, lz)
   // Body shell sits above a chassis gap; top layer reads as a panel highlight.
   const floor = 1
@@ -343,7 +315,8 @@ export function vehicleModel(kind: VehicleKind, seed: number): VoxelModel {
     g.set(wx, 1, floor, 7)
     g.set(wx, ly - 2, floor, 7)
   }
-  return g.extract(palette)
+  const grid = heading === "-y" ? rotateZToNegY(g) : g
+  return grid.extract(palette)
 }
 
 // --- Bollard ---------------------------------------------------------------
