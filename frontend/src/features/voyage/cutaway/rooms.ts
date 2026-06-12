@@ -66,9 +66,11 @@ export const ROOMS: RoomDef[] = [
     props: [
       { kind: "bridgescreens", x: 1.5, z: 3.9 },
       { kind: "console", x: 1.5, z: 1 },
-      { kind: "wheel", x: 10.5, z: 1 },
-      { kind: "captainchair", x: 14, z: 1 },
-      { kind: "radarscope", x: 17.5, z: 1 },
+      { kind: "throttle", x: 9.2, z: 1 },
+      { kind: "wheel", x: 11.8, z: 1 },
+      { kind: "captainchair", x: 15, z: 1 },
+      { kind: "radarscope", x: 17.8, z: 1 },
+      { kind: "switchpanel", x: 15.5, z: 5.1 },
     ],
   },
   {

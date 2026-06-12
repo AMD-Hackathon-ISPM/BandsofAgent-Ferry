@@ -26,12 +26,14 @@ const CHIP_BG = "#0d142e"
 const CHIP_BORDER = "#33416e"
 const LABEL = "#d6deef"
 const SKY = "#0d1834"
-const SEA = "#16335f"
-const SEA_HI = "#26508c"
-const HORIZON = "#2c4a7c"
+const SKY_HI = "#14254c"
 const STAR = "#c6d0e6"
-const GLOW = "242, 193, 78" // warm lamp light, rgb triplet for alpha fills
+const STAR_DIM = "#5a6b94"
+const BIRD = "142, 156, 189" // gull silhouettes outside the glass
+const GLOW = "232, 163, 61" // warm lamp light (#e8a33d), rgb for alpha fills
 const MOON = "140, 180, 255" // cool window light
+const BLOOM_SCREEN = "116, 224, 176" // soft bloom behind lit screens
+const BLOOM_RED = "196, 87, 74" // vending / warning bloom
 
 /** Rooms this short get a single-cell floor so furniture still fits. */
 const SHALLOW_ROOM_H = 8
@@ -160,6 +162,7 @@ const SPRITE_PALETTE: Record<string, string> = {
   P: "#356e44",
   t: "#6fb3c9",
   T: "#2f6275",
+  S: "#0d1834", // night sky through glass
 }
 
 const SPRITES: Record<string, string[]> = {
@@ -228,6 +231,35 @@ const SPRITES: Record<string, string[]> = {
     "....KK....",
     "...KddK...",
     "..KKKKKK..",
+  ],
+  throttle: [
+    "..Ky..Kr..",
+    "..Kh..Kh..",
+    "..Kh..Kh..",
+    ".KKKKKKKK.",
+    ".KmmmmmmK.",
+    ".KmMmmMmK.",
+    ".KKKKKKKK.",
+    "..KddddK..",
+  ],
+  switchpanel: [
+    "KKKKKKKKKKKKKKKKKK",
+    "KmymbmgmrmymbmgmrK",
+    "KhmhmhmhmhmhmhmhmK",
+    "KKKKKKKKKKKKKKKKKK",
+  ],
+  porthole: [
+    "...KKKKKK...",
+    "..KMhhhhMK..",
+    ".KMKKKKKKMK.",
+    ".KhKSSSSKhK.",
+    "KMKSSSScSKMK",
+    "KMKSSSSSSKMK",
+    "KMKScSSSSKMK",
+    ".KhKSSSSKhK.",
+    ".KMKKKKKKMK.",
+    "..KMhhhhMK..",
+    "...KKKKKK...",
   ],
 
   // --- Chart room -------------------------------------------------------------
@@ -713,8 +745,20 @@ const SCREEN_KINDS = new Set([
   "console",
   "monitorwall",
   "radarscope",
-  "gaugewall",
 ])
+
+/** Sprite kinds that get a soft bloom halo baked behind them. */
+const BLOOM_KINDS: Record<string, string> = {
+  bridgescreens: BLOOM_SCREEN,
+  console: BLOOM_SCREEN,
+  monitorwall: BLOOM_SCREEN,
+  radarscope: BLOOM_SCREEN,
+  gaugewall: BLOOM_SCREEN,
+  serverrack: BLOOM_SCREEN,
+  testpod: BLOOM_SCREEN,
+  maptable: BLOOM_SCREEN,
+  vending: BLOOM_RED,
+}
 
 function drawSprite(
   ctx: CanvasRenderingContext2D,
@@ -879,7 +923,6 @@ export function paintRoom(
   // sea, with a light sill line underneath.
   const band = windowBand(room)
   if (band) {
-    const horizonZ = Math.floor((band.z0 + band.z1) / 2)
     const sill = mixHex(theme.wallTop, "#e8edf8", 0.35)
     for (let x = room.x0 + 1; x <= room.x1 - 1; x++) {
       if (!band.glassAt(x)) continue
@@ -891,17 +934,16 @@ export function paintRoom(
         if (!region(x, z)) continue
         const cx = cellX(x)
         const cy = cellY(z)
-        ctx.fillStyle = z > horizonZ ? SKY : z === horizonZ ? HORIZON : SEA
+        // Open night sky, faintly brighter toward the bottom of the pane.
+        ctx.fillStyle = z <= band.z0 + 1 ? SKY_HI : SKY
         ctx.fillRect(cx, cy, zoom, zoom)
         const h = hash2(x, z)
-        if (z < horizonZ && h % 7 === 0) {
-          // Moonlit wave crests.
-          ctx.fillStyle = SEA_HI
-          ctx.fillRect(cx + (h % 3) * sub, cy + sub, 2 * sub, 1)
-        }
-        if (z > horizonZ && (x * 7 + z * 13) % 19 === 0) {
+        if ((x * 7 + z * 13) % 17 === 0) {
           ctx.fillStyle = STAR
           ctx.fillRect(cx + 2 * sub, cy + sub, 1, 1)
+        } else if (h % 9 === 0) {
+          ctx.fillStyle = STAR_DIM
+          ctx.fillRect(cx + (h % 3) * sub, cy + ((h >> 2) % 3) * sub, 1, 1)
         }
       }
       const sillZ = band.z0 - 1
@@ -949,10 +991,34 @@ export function paintRoom(
   const roomRight = cellX(room.x0) + zoom
   const floorTopY = cellY(floorTopZ - 1)
   const ceilY = cellY(room.z1)
+  const w = room.x1 - room.x0 + 1
 
   // Ceiling fascia: a solid recessed band under the deck above.
   ctx.fillStyle = mixHex(theme.wallTop, "#05070f", 0.45)
   ctx.fillRect(roomLeft, ceilY, roomRight - roomLeft, Math.floor(zoom / 2))
+
+  // Hull rooms get portholes with the night sea behind them, and a sagging
+  // cable run along the upper wall (cabin rooms have real windows instead).
+  if (!band) {
+    const portholes = Math.max(1, Math.round(w / 12))
+    const phRows = SPRITES.porthole
+    const phH = Math.round(phRows.length * u)
+    const phY =
+      ceilY + Math.round((floorTopY - ceilY) * 0.32) - Math.round(phH / 2)
+    for (let i = 0; i < portholes; i++) {
+      const fx = room.x0 + ((i + 1) * w) / (portholes + 1)
+      const px = cellX(Math.round(fx)) - Math.round((spriteWidth(phRows) * u) / 2)
+      drawSprite(ctx, phRows, px, phY, u, accent, accentDark)
+    }
+    ctx.fillStyle = "#141c33"
+    const cableY = ceilY + Math.floor(zoom * 1.1)
+    const span = 6 * zoom
+    for (let sx = roomLeft + zoom; sx < roomRight - zoom; sx += sub) {
+      const ph = ((sx - roomLeft) % span) / span
+      const sag = Math.round(Math.sin(ph * Math.PI) * 2.5 * sub)
+      ctx.fillRect(sx, cableY + sag, sub, Math.max(1, sub))
+    }
+  }
 
   // Cool moonlight beams falling inward from each window run onto the floor.
   if (band) {
@@ -984,7 +1050,6 @@ export function paintRoom(
   }
 
   // Hanging warm lights with stepped glow cones and a floor pool.
-  const w = room.x1 - room.x0 + 1
   const lights = lampCount(room)
   for (let i = 0; i < lights; i++) {
     const fx = room.x0 + ((i + 1) * w) / (lights + 1)
@@ -1001,7 +1066,7 @@ export function paintRoom(
     const poolH = floorTopY - coneTop
     const widths = [2.5, 4.5, 6.5]
     for (let k = 0; k < 3; k++) {
-      ctx.fillStyle = `rgba(${GLOW}, ${[0.1, 0.06, 0.035][k]})`
+      ctx.fillStyle = `rgba(${GLOW}, ${[0.16, 0.11, 0.07][k]})`
       const gw = Math.floor(widths[k] * zoom)
       ctx.fillRect(
         fxPx - Math.floor(gw / 2),
@@ -1011,12 +1076,13 @@ export function paintRoom(
       )
     }
     // Warm pool on the floor surface.
-    ctx.fillStyle = `rgba(${GLOW}, 0.08)`
+    ctx.fillStyle = `rgba(${GLOW}, 0.1)`
     const pw = Math.floor(7 * zoom)
     ctx.fillRect(fxPx - Math.floor(pw / 2), floorTopY, pw, floorH * zoom - 1)
   }
 
-  // Furniture, each grounded by a contact shadow.
+  // Furniture: lit pieces bloom softly, every piece grounded by a contact
+  // shadow.
   for (const prop of room.props ?? []) {
     const rows = SPRITES[prop.kind]
     if (!rows) continue
@@ -1024,6 +1090,14 @@ export function paintRoom(
     const bottomY = cellY(room.z0 + prop.z - 1)
     const topY = bottomY - Math.round(rows.length * u)
     const wPx = Math.round(spriteWidth(rows) * u)
+    const hPx = bottomY - topY
+    const bloom = BLOOM_KINDS[prop.kind]
+    if (bloom) {
+      ctx.fillStyle = `rgba(${bloom}, 0.05)`
+      ctx.fillRect(px - 4 * sub, topY - 4 * sub, wPx + 8 * sub, hPx + 8 * sub)
+      ctx.fillStyle = `rgba(${bloom}, 0.07)`
+      ctx.fillRect(px - 2 * sub, topY - 2 * sub, wPx + 4 * sub, hPx + 4 * sub)
+    }
     ctx.fillStyle = "rgba(4, 6, 14, 0.3)"
     ctx.fillRect(px - sub, bottomY - 2 * sub, wPx + 2 * sub, 3 * sub)
     drawSprite(ctx, rows, px, topY, u, accent, accentDark)
@@ -1048,6 +1122,22 @@ export function paintRoom(
   ctx.fillRect(roomLeft, ceilY, roomRight - roomLeft, zoom)
   ctx.fillStyle = "rgba(4, 6, 14, 0.25)"
   ctx.fillRect(roomLeft, floorTopY - sub, roomRight - roomLeft, sub)
+
+  // Corner vignette: the four corners fall off darker than the room center.
+  const vw = Math.min(3 * zoom, Math.floor((roomRight - roomLeft) / 4))
+  const vh = Math.min(2 * zoom, Math.floor(roomPxH / 3))
+  const floorBotY = cellY(room.z0 - 1)
+  for (const [cx, cy] of [
+    [roomLeft, ceilY],
+    [roomRight - vw, ceilY],
+    [roomLeft, floorBotY - vh],
+    [roomRight - vw, floorBotY - vh],
+  ]) {
+    ctx.fillStyle = "rgba(4, 6, 14, 0.12)"
+    ctx.fillRect(cx, cy, vw, vh)
+    ctx.fillStyle = "rgba(4, 6, 14, 0.08)"
+    ctx.fillRect(cx, cy, Math.floor(vw / 2), Math.floor(vh / 2))
+  }
 
   ctx.restore()
 
@@ -1097,7 +1187,15 @@ export function paintRoom(
 // Live animation overlay — stateless, driven by wall-clock time, drawn over
 // the baked interior every frame while the cutaway is revealed.
 
-type AnchorKind = "screen" | "leds" | "engineglow" | "steam" | "lamp" | "sea"
+type AnchorKind =
+  | "screen"
+  | "leds"
+  | "engineglow"
+  | "steam"
+  | "lamp"
+  | "radar"
+  | "gauges"
+  | "birds"
 
 interface AnimAnchor {
   kind: AnchorKind
@@ -1135,6 +1233,20 @@ function buildAnchors(zoom: number): AnimAnchor[] {
       seed++
       if (SCREEN_KINDS.has(prop.kind)) {
         anchors.push({ kind: "screen", x: px, y: topY, w: wPx, h: hPx, seed })
+        if (prop.kind === "radarscope") {
+          // The scope circle is rows 1–6 of the sprite.
+          seed++
+          anchors.push({
+            kind: "radar",
+            x: px + Math.round(2 * u),
+            y: topY + Math.round(1 * u),
+            w: Math.round(6 * u),
+            h: Math.round(5 * u),
+            seed,
+          })
+        }
+      } else if (prop.kind === "gaugewall") {
+        anchors.push({ kind: "gauges", x: px, y: topY, w: wPx, h: hPx, seed })
       } else if (prop.kind === "serverrack") {
         anchors.push({ kind: "leds", x: px, y: topY, w: wPx, h: hPx, seed })
       } else if (prop.kind === "engine") {
@@ -1180,32 +1292,31 @@ function buildAnchors(zoom: number): AnimAnchor[] {
       })
     }
 
-    // Sea glints drift across the window horizon.
+    // Birds fly past each window run (the sky outside the glass).
     const band = windowBand(room)
     if (band) {
-      const horizonZ = Math.floor((band.z0 + band.z1) / 2)
-      let runStart = -1
-      for (let x = room.x0; x <= room.x1 + 1; x++) {
-        const occ =
-          x >= 0 &&
-          x < p.lx &&
-          p.occupancy[horizonZ * p.lx + x] === 1 &&
-          x >= room.x0 &&
-          x <= room.x1
-        const glass = x <= room.x1 && occ && band.glassAt(x)
-        if (glass && runStart < 0) runStart = x
-        if (!glass && runStart >= 0) {
-          const runEnd = x - 1
-          seed++
-          anchors.push({
-            kind: "sea",
-            x: cellX(runEnd),
-            y: cellY(horizonZ - 1),
-            w: (runEnd - runStart + 1) * zoom,
-            h: Math.max(1, zoom),
-            seed,
-          })
-          runStart = -1
+      const zHi = Math.min(band.z1, room.z1)
+      const zLo = Math.max(band.z0, room.z0 + floorH)
+      if (zHi >= zLo) {
+        let runStart = -1
+        for (let x = room.x0; x <= room.x1 + 1; x++) {
+          const occ =
+            x < p.lx && x <= room.x1 && p.occupancy[zHi * p.lx + x] === 1
+          const glass = occ && band.glassAt(x)
+          if (glass && runStart < 0) runStart = x
+          if (!glass && runStart >= 0) {
+            const runEnd = x - 1
+            seed++
+            anchors.push({
+              kind: "birds",
+              x: cellX(runEnd),
+              y: cellY(zHi),
+              w: (runEnd - runStart + 1) * zoom,
+              h: (zHi - zLo + 1) * zoom,
+              seed,
+            })
+            runStart = -1
+          }
         }
       }
     }
@@ -1218,6 +1329,8 @@ function buildAnchors(zoom: number): AnimAnchor[] {
  * interior canvas was blitted; `t` is seconds; `alpha` follows the cutaway
  * reveal so effects fade in with the rooms.
  */
+let reducedMotion: MediaQueryList | null = null
+
 export function drawInteriorAnimations(
   ctx: CanvasRenderingContext2D,
   ox: number,
@@ -1226,6 +1339,10 @@ export function drawInteriorAnimations(
   t: number,
   alpha: number
 ) {
+  if (!reducedMotion)
+    reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
+  if (reducedMotion.matches) return
+
   let anchors = anchorCache.get(zoom)
   if (!anchors) {
     anchors = buildAnchors(zoom)
@@ -1274,18 +1391,61 @@ export function drawInteriorAnimations(
         break
       }
       case "lamp": {
-        const f =
-          Math.sin(t * 11 + a.seed * 3.1) * Math.sin(t * 5.7 + a.seed * 1.7)
-        const glow = 0.03 + 0.035 * Math.max(0, f)
-        ctx.fillStyle = `rgba(${GLOW}, ${glow * alpha})`
+        // Slow breathing pulse (the baked cone is ~0.9; this tops it to 1).
+        const pulse = 0.5 + 0.5 * Math.sin(t * 0.9 + a.seed * 2.3)
+        ctx.fillStyle = `rgba(${GLOW}, ${0.035 * pulse * alpha})`
         ctx.fillRect(x, y, a.w, a.h)
         break
       }
-      case "sea": {
-        for (let k = 0; k < 2; k++) {
-          const gx = ((t * 0.4 + a.seed * 0.37 + k * 0.5) % 1) * a.w
-          ctx.fillStyle = `rgba(198, 214, 236, ${0.45 * alpha})`
-          ctx.fillRect(x + Math.floor(gx), y + Math.floor(a.h / 2), 2, 1)
+      case "radar": {
+        // Rotating sweep arm, drawn as stepped pixels from the scope center.
+        const cx = x + a.w / 2
+        const cy = y + a.h / 2
+        const ang = t * 1.5 + a.seed
+        const r = Math.min(a.w, a.h) / 2
+        ctx.fillStyle = `rgba(174, 240, 208, ${0.7 * alpha})`
+        const steps = Math.max(2, Math.floor(r))
+        for (let k = 1; k <= steps; k++) {
+          const rr = (k / steps) * r
+          ctx.fillRect(
+            Math.round(cx + Math.cos(ang) * rr),
+            Math.round(cy + Math.sin(ang) * rr),
+            1,
+            1
+          )
+        }
+        break
+      }
+      case "gauges": {
+        // Needle wobble under the three dials of the gauge wall.
+        const dialY = y + Math.round(a.h * 0.25)
+        for (let k = 0; k < 3; k++) {
+          const dx = x + Math.round(a.w * (0.2 + k * 0.31))
+          const wob = Math.round(Math.sin(t * 2.1 + k * 1.9 + a.seed) * u)
+          ctx.fillStyle = `rgba(10, 15, 31, ${0.8 * alpha})`
+          ctx.fillRect(dx + wob, dialY, 1, 2 * u)
+        }
+        break
+      }
+      case "birds": {
+        // Gulls drifting across the glass, wings flapping between a "v"
+        // and a level glide. Wide panes get a second, slower bird.
+        const count = a.w > 5 * zoom ? 2 : 1
+        for (let k = 0; k < count; k++) {
+          const speed = 0.06 + 0.03 * ((a.seed + k) % 3)
+          const ph = (t * speed + a.seed * 0.43 + k * 0.5) % 1
+          const bx = x + Math.floor(ph * a.w)
+          const by =
+            y +
+            Math.floor(
+              a.h * (0.3 + 0.18 * Math.sin(t * 0.8 + a.seed * 1.3 + k * 2))
+            )
+          const s = Math.max(1, Math.floor(zoom / 6))
+          const flap = Math.floor(t * 4 + a.seed + k) % 2 === 0
+          ctx.fillStyle = `rgba(${BIRD}, ${0.85 * alpha})`
+          ctx.fillRect(bx, by, s, s)
+          ctx.fillRect(bx - s, by - (flap ? s : 0), s, s)
+          ctx.fillRect(bx + s, by - (flap ? s : 0), s, s)
         }
         break
       }
