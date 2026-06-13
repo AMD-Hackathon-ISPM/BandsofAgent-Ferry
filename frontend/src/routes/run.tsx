@@ -18,7 +18,7 @@ import { fetchRun } from "@/lib/api"
 import { useLiveRun, useMediaQuery, useNow } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
 import { cn } from "@/lib/utils"
-import { AgentRoster } from "@/features/runs/components/agent-roster"
+import { CrewRoster } from "@/features/voyage/crew-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { ShipLog } from "@/features/voyage/ship-log"
@@ -196,15 +196,7 @@ function RunReady({
   const activeAgents = liveRun.agents.filter(
     (a) => a.status === "active"
   ).length
-  const roster = (
-    <AgentRoster
-      run={liveRun}
-      selected={selectedAgent}
-      onSelect={setSelectedAgent}
-      now={now}
-      className="h-full overflow-y-auto"
-    />
-  )
+  const roster = <CrewRoster run={liveRun} className="h-full" />
   const feed = (
     <BandFeed
       run={liveRun}
@@ -268,7 +260,7 @@ function RunReady({
 
           <FolderPanel
             side="left"
-            label="The band"
+            label="Crew"
             badge={activeAgents > 0 ? String(activeAgents) : undefined}
             open={leftOpen}
             onOpenChange={setLeftOpen}
@@ -362,7 +354,7 @@ function RunReady({
             >
               <TabsTrigger value="voyage">Voyage</TabsTrigger>
               <TabsTrigger value="feed">Band room</TabsTrigger>
-              <TabsTrigger value="band">The band</TabsTrigger>
+              <TabsTrigger value="band">Crew</TabsTrigger>
               <TabsTrigger value="outputs">Outputs</TabsTrigger>
             </TabsList>
             <TabsContent

@@ -23,11 +23,9 @@ const WATCH: Record<AgentRunStatus, { label: string; tone: string }> = {
  */
 export function CrewRoster({
   run,
-  visible,
   className,
 }: {
   run: Run
-  visible: boolean
   className?: string
 }) {
   const [open, setOpen] = React.useState<AgentKey | null>(null)
@@ -43,13 +41,9 @@ export function CrewRoster({
   }, [run.agents])
 
   return (
-    <aside
-      aria-hidden={!visible}
-      className={cn(
-        "pointer-events-none absolute top-4 right-4 bottom-4 z-10 flex w-64 max-w-[calc(100%-2rem)] flex-col rounded-md border border-border bg-card/90 shadow-lg backdrop-blur-sm transition-opacity duration-300",
-        visible ? "pointer-events-auto opacity-100" : "opacity-0",
-        className
-      )}
+    <section
+      aria-label="Crew roster"
+      className={cn("flex min-h-0 flex-col", className)}
     >
       <div className="border-b border-border px-3 py-2">
         <span className="font-mono text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -129,6 +123,6 @@ export function CrewRoster({
           )
         })}
       </div>
-    </aside>
+    </section>
   )
 }

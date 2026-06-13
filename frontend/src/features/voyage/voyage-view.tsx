@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils"
 import { deriveVoyage, type VoyageStatus } from "./progress"
 import { useVoyageScene } from "./use-voyage-scene"
 import { ShipLog } from "./ship-log"
-import { CrewRoster } from "./crew-roster"
 import { setCrewMessages, setCrewRuntime } from "./cutaway/crew-sim"
 
 /**
@@ -128,7 +127,6 @@ export function VoyageView(props: {
       {showLog && !intro && (
         <ShipLog messages={messages} streamedIds={streamedIds} />
       )}
-      {!intro && <CrewRoster run={run} visible={inspecting} />}
       {!intro && voyage.mode === "arrived" && run.pr && (
         <ArrivalPopup run={run} pr={run.pr} />
       )}
