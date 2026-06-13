@@ -282,6 +282,23 @@ export function useVoyageScene(
     }
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // Space casts off from the loading dock — skips the dwell/readiness
+      // gates and sails out. Works every time the dock is shown (the flag
+      // resets on re-berth); ignored while typing in a field.
+      if (e.key === " " || e.code === "Space") {
+        const t = e.target as HTMLElement | null
+        const typing =
+          t &&
+          (t.tagName === "INPUT" ||
+            t.tagName === "TEXTAREA" ||
+            t.isContentEditable)
+        if (!typing && scene.mode === "sea" && scene.stage === "dock") {
+          scene.castOff = true
+          e.preventDefault()
+          if (reduced) stillFrameRef.current?.() // jump straight to sea
+          return
+        }
+      }
       if (scene.mode !== "inspect") return
       if (e.key === "Escape") {
         leaveInspect()
@@ -318,6 +335,7 @@ export function useVoyageScene(
       scene.progress = voyageRef.current.target
       snapStage(scene) // no animation loop to play transitions — jump there
       updateScene(scene, 0)
+      notifyStage()
       drawFrame(ctx, scene, sprites, harbor, harborFerry)
     }
 

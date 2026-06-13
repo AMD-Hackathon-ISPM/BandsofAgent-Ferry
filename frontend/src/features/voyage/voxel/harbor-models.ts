@@ -328,3 +328,91 @@ export function bollardModel(): VoxelModel {
   g.box(0, 2, 0, 2, 0, 3, (_x, _y, z) => (z === 3 ? 2 : 1))
   return g.extract(BOLLARD_PALETTE)
 }
+
+// --- Harbor gate --------------------------------------------------------------
+// The exit gatehouse the unloading trucks disappear through: two concrete
+// pillars flanking the road, a beamed arch with a lit sign strip, and a
+// small guard hut with a warm window tucked beside the right pillar.
+
+const GATE_PALETTE = [
+  "#000000",
+  "#3a4a70", // 1 pillar concrete
+  "#2f3d61", // 2 pillar side
+  "#4f6bff", // 3 beam accent
+  "#f2c14e", // 4 lit sign strip / window
+  "#1b2747", // 5 dark trim
+  "#8e9cbd", // 6 beam light
+]
+
+/** Road runs through the gate along y, centered at local x = 9. */
+export function gateModel(): VoxelModel {
+  const lx = 27
+  const g = new VoxelGrid(lx, 5, 14)
+  // Pillars flanking the road (centerline x 9, half-width 5 + clearance).
+  for (const px of [0, 16]) {
+    g.box(px, px + 2, 1, 3, 0, 10, (x, _y, z) =>
+      z >= 9 ? 5 : x === px ? 2 : 1
+    )
+  }
+  // Beam arch with a lit strip and indigo cap.
+  g.box(0, 18, 1, 3, 11, 12, (_x, _y, z) => (z === 12 ? 3 : 6))
+  g.box(4, 14, 2, 2, 11, 11, 4)
+  // Guard hut beside the right pillar.
+  g.box(20, 26, 0, 4, 0, 6, (x, y, z) => {
+    if (z >= 6) return 5
+    if (z >= 2 && z <= 4 && y === 4 && x >= 22 && x <= 24) return 4
+    return x === 20 || x === 26 ? 2 : 1
+  })
+  return g.extract(GATE_PALETTE)
+}
+
+// --- Shipping container -----------------------------------------------------------
+
+/** A ribbed cargo container in the given body/shade colors. */
+export function containerModel(body: string, shade: string): VoxelModel {
+  const palette = ["#000000", body, shade, "#1b2233", "#aeb9d6"]
+  const lx = 16
+  const ly = 7
+  const lz = 7
+  const g = new VoxelGrid(lx, ly, lz)
+  g.box(0, lx - 1, 0, ly - 1, 0, lz - 1, (x, _y, z) => {
+    // Corner posts and roof edge read dark; ribbed sides alternate shading.
+    if (x === 0 || x === lx - 1) return 3
+    if (z === lz - 1) return x % 2 === 0 ? 1 : 4
+    return x % 2 === 0 ? 2 : 1
+  })
+  return g.extract(palette)
+}
+
+// --- Forklift ----------------------------------------------------------------------
+
+const FORKLIFT_PALETTE = [
+  "#000000",
+  "#f2c14e", // 1 body
+  "#0e1730", // 2 wheels / mast
+  "#1b2747", // 3 seat / trim
+  "#8e9cbd", // 4 fork
+]
+
+export function forkliftModel(): VoxelModel {
+  const g = new VoxelGrid(9, 5, 8)
+  // Body with a seat well; mast and forks at the high-x nose.
+  g.box(1, 6, 1, 3, 1, 3, 1)
+  g.box(2, 4, 1, 3, 4, 4, 3)
+  // Roll cage.
+  for (const x of [2, 5]) {
+    g.set(x, 1, 5, 2)
+    g.set(x, 3, 5, 2)
+  }
+  g.box(2, 5, 1, 3, 6, 6, 1)
+  // Mast + forks.
+  g.box(7, 7, 1, 3, 1, 5, 2)
+  g.set(8, 1, 0, 4)
+  g.set(8, 3, 0, 4)
+  // Wheels.
+  for (const x of [1, 6]) {
+    g.set(x, 0, 0, 2)
+    g.set(x, 4, 0, 2)
+  }
+  return g.extract(FORKLIFT_PALETTE)
+}

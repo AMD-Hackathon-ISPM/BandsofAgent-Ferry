@@ -9,6 +9,7 @@ import {
   createHarborState,
   departShipOffscreen,
   destApproachStartG,
+  updateDestination,
   updateHarbor,
   type HarborState,
 } from "./harbor"
@@ -84,6 +85,13 @@ export interface SceneState {
    * sea scene never waits on it.
    */
   ready: boolean
+  /**
+   * Space-bar cast-off: skips the dock's dwell/readiness gates and departs
+   * immediately, and keeps a still-pending run out at sea instead of snapping
+   * it back to the dock. Cleared whenever the scene re-berths, so the skip
+   * works on every visit to the loading dock.
+   */
+  castOff: boolean
   onShipClick?: () => void
 }
 
@@ -162,6 +170,7 @@ export function createScene(): SceneState {
     keys: new Set(),
     harbor: createHarborState(),
     ready: true,
+    castOff: false,
   }
 }
 
@@ -185,8 +194,13 @@ export function snapStage(s: SceneState, opts?: { forceDock?: boolean }) {
   }
   switch (s.voyage.mode) {
     case "pending":
-      snapDock(s)
-      return
+      // A space-bar cast-off keeps a pending run at sea instead of the dock.
+      if (!s.castOff) {
+        snapDock(s)
+        return
+      }
+      snapSea(s)
+      break
     case "arrived":
       s.stage = "docked"
       s.shipG = 0
@@ -198,20 +212,25 @@ export function snapStage(s: SceneState, opts?: { forceDock?: boolean }) {
       s.speed = 0
       break
     default:
-      s.stage = "sea"
-      s.shipG = 0
-      s.shipV = 0
-      s.departFade = 1
-      s.arriveFade = 0
-      s.seaEnter = 1
-      s.doorT = 1
+      snapSea(s)
       break
   }
   s.shipXFrac = SEA_X
   s.stageT = 0
 }
 
+function snapSea(s: SceneState) {
+  s.stage = "sea"
+  s.shipG = 0
+  s.shipV = 0
+  s.departFade = 1
+  s.arriveFade = 0
+  s.seaEnter = 1
+  s.doorT = 1
+}
+
 function snapDock(s: SceneState) {
+  s.castOff = false
   s.stage = "dock"
   s.shipG = 0
   s.shipV = 0
@@ -241,8 +260,12 @@ function updateStage(s: SceneState, dt: number) {
       s.doorT = 0
       // Depart once the run is actually moving AND the loading screen has had
       // its minimum dwell and any crucial assets are ready (max of the two).
+      // A space-bar cast-off skips all of those gates.
       if (mode === "arrived") snapStage(s)
-      else if (mode !== "pending" && s.stageT >= HARBOR_MIN_DUR && s.ready) {
+      else if (
+        s.castOff ||
+        (mode !== "pending" && s.stageT >= HARBOR_MIN_DUR && s.ready)
+      ) {
         setStage(s, "depart")
       }
       break
@@ -276,7 +299,7 @@ function updateStage(s: SceneState, dt: number) {
         setStage(s, "arrive")
         s.arriveFade = 0
         s.shipG = destApproachStartG(s)
-      } else if (mode === "pending") snapStage(s)
+      } else if (mode === "pending" && !s.castOff) snapStage(s)
       break
     case "arrive": {
       // Cross-fade the small at-sea ferry into the destination harbor scene,
@@ -323,6 +346,7 @@ export function updateScene(s: SceneState, dt: number) {
   s.t += dt
   updateStage(s, dt)
   if (s.stage === "dock" || s.stage === "depart") updateHarbor(s, dt)
+  if (s.stage === "arrive" || s.stage === "docked") updateDestination(s, dt)
 
   const ease = Math.min(1, dt * 0.8)
   s.progress += (s.voyage.target - s.progress) * ease

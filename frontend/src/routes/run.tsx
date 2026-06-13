@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link, useLocation, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
@@ -160,24 +160,24 @@ function RunReady({
   const [rightOpen, setRightOpen] = React.useState(true)
   const isXL = useMediaQuery("(min-width: 1280px)")
 
-  // Full-screen loading harbor: shown on a fresh launch (or a genuinely
+  // Full-screen loading harbor: shown on every fresh launch (or a genuinely
   // pending run) until the ferry sails out, then the control panels fade in.
+  // The justLaunched flag is cleared from history on departure so a refresh
+  // afterwards lands straight in the live view.
   const location = useLocation()
+  const navigate = useNavigate()
   const justLaunched = Boolean(
     (location.state as { justLaunched?: boolean } | null)?.justLaunched
   )
-  const introKey = `ferry-harbor-played-${run.id}`
   const [phase, setPhase] = React.useState<"loading" | "normal">(() =>
-    run.status === "pending" ||
-    (justLaunched && sessionStorage.getItem(introKey) !== "1")
-      ? "loading"
-      : "normal"
+    run.status === "pending" || justLaunched ? "loading" : "normal"
   )
   const loading = phase === "loading"
   const onDeparted = React.useCallback(() => {
-    sessionStorage.setItem(introKey, "1")
     setPhase("normal")
-  }, [introKey])
+    if (justLaunched)
+      navigate(location.pathname, { replace: true, state: null })
+  }, [justLaunched, navigate, location.pathname])
 
   const handleAction = React.useCallback(() => {
     setPane("outputs")

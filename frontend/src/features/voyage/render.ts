@@ -12,7 +12,6 @@ import type { Sprites } from "./sprites"
 import { drawInspect } from "./inspect"
 import {
   drawDestinationBack,
-  drawDestinationFront,
   drawHarborBack,
   drawHarborFront,
   harborFerryPos,
@@ -60,8 +59,10 @@ function drawSeaScene(
     drawHarborFront(ctx, s, harbor, harborAlpha)
   }
 
-  // Destination harbor (top-right): fades in at the start of the arrive
-  // stage, then the big ferry slides in from the bottom-left and moors.
+  // Destination island terminal (top side): fades in at the start of the
+  // arrive stage, then the big ferry slides in from the bottom-left and
+  // moors alongside the pad. Everything on the island sits on the ship's
+  // far side, so no over-ship layer is needed.
   const atDest = s.stage === "arrive" || s.stage === "docked"
   if (atDest && s.arriveFade > 0.01) {
     drawDestinationBack(ctx, s, harbor, s.arriveFade)
@@ -70,7 +71,6 @@ function drawSeaScene(
     ctx.drawImage(harborFerry.shadow, dp.x, dp.y + 1)
     ctx.drawImage(harborFerry.frames[0], dp.x, dp.y)
     ctx.globalAlpha = 1
-    drawDestinationFront(ctx, s, harbor, s.arriveFade)
   }
 
   // Wake foam, oldest faintest.

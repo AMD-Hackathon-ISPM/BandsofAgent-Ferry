@@ -17,6 +17,9 @@ import { KZ } from "./voxel/voxel-render"
 import { bakeIsoSprite, type IsoSprite } from "./voxel/iso-bake"
 import {
   bollardModel,
+  containerModel,
+  forkliftModel,
+  gateModel,
   lampModel,
   quayModel,
   terminalModel,
@@ -57,7 +60,7 @@ export interface HarborSite {
 }
 
 export const DEPART_SITE: HarborSite = { fx: 0.3, fy: 0.64 }
-export const DEST_SITE: HarborSite = { fx: 0.46, fy: 0.46 }
+export const DEST_SITE: HarborSite = { fx: 0.42, fy: 0.58 }
 
 function groundOrigin(s: SceneState, site: HarborSite): { x: number; y: number } {
   return { x: Math.floor(s.bufW * site.fx), y: Math.floor(s.bufH * site.fy) }
@@ -144,19 +147,38 @@ const DEPART_ROADS: QuayRoads = {
   ],
 }
 
-/** Destination quay: bleeds off the top and right screen edges; the ship
- *  berths along its camera-facing front edge. */
-const DEST_QUAY_G = { x: -60, y: -110, z: -2 }
-const DEST_QUAY_LX = 210
-const DEST_QUAY_LY = 96
+/** Destination quay: one big concrete slab like the departure harbor,
+ *  bleeding off the top and left screen edges. The ship berths alongside its
+ *  front edge (port side to the land, bow past the pier end). */
+const DEST_QUAY_G = { x: -150, y: -144, z: -2 }
+const DEST_QUAY_LX = 220
+const DEST_QUAY_LY = 110
+
+/** Side cargo bridge: from the ship's camera-hidden port-side door across
+ *  the berth gap down onto the quay. Trucks roll off along −gy. */
+const BRIDGE_X = 14
+const BRIDGE_SHIP_Y = -16
+ const BRIDGE_PAD_Y = -35
+const BRIDGE_HALF_W = 6
+const UNLOAD_BRIDGE_LEN = BRIDGE_SHIP_Y - BRIDGE_PAD_Y
+/** The exit gatehouse the unload road runs through; trucks are clipped away
+ *  at this plane, so they read as leaving the harbor through the gate. */
+const GATE_Y = -100
+const UNLOAD_END = BRIDGE_SHIP_Y - GATE_Y // nose distance at the gate plane
 
 const DEST_ROADS: QuayRoads = {
-  laneY: -22 - DEST_QUAY_G.y,
-  laneX0: 8,
-  laneX1: 166,
-  entryX: -999, // no entry road at the destination
+  // Cross lane the unload road tees into, just past the gate.
+  laneY: -114 - DEST_QUAY_G.y,
+  laneX0: 20,
+  laneX1: DEST_QUAY_LX - 20,
+  entryX: BRIDGE_X - DEST_QUAY_G.x, // the unload road off the bridge foot
   halfW: ROAD_HALF_W,
-  lots: [],
+  lots: [
+    // Container yard right of the road, between the gate and the berth.
+    { x0: 180, x1: 212, y0: 46, y1: 74, pitch: 16 },
+    // Second yard on the terminal side.
+    { x0: 60, x1: 100, y0: 50, y1: 78, pitch: 18 },
+  ],
 }
 
 /** Static parked cars dressing the lots: [gx, gy, spriteIdx]. */
@@ -178,9 +200,12 @@ const VEHICLE_KINDS: VehicleKind[] = ["car", "van", "truck", "car", "bus", "car"
 export interface HarborScene {
   quay: IsoSprite
   destQuay: IsoSprite
+  gate: IsoSprite
   terminal: IsoSprite
   lamp: IsoSprite
   trees: IsoSprite[]
+  containers: IsoSprite[]
+  forklift: IsoSprite
   bollard: IsoSprite
   /** Boarding vehicles driving along +gx (and parked cars). */
   vehicles: IsoSprite[]
@@ -188,13 +213,27 @@ export interface HarborScene {
   vehiclesSide: IsoSprite[]
 }
 
+const CONTAINER_COLORS: Array<[string, string]> = [
+  ["#d9772f", "#a8581f"], // orange
+  ["#3f6ad8", "#2c4ba0"], // indigo
+  ["#c84d4d", "#94372f"], // red
+]
+
 export function bakeHarborScene(): HarborScene {
   return {
     quay: bakeIsoSprite(quayModel(QUAY_LX, QUAY_LY, DEPART_ROADS), Z),
-    destQuay: bakeIsoSprite(quayModel(DEST_QUAY_LX, DEST_QUAY_LY, DEST_ROADS), Z),
+    destQuay: bakeIsoSprite(
+      quayModel(DEST_QUAY_LX, DEST_QUAY_LY, DEST_ROADS),
+      Z
+    ),
+    gate: bakeIsoSprite(gateModel(), Z),
     terminal: bakeIsoSprite(terminalModel(), Z),
     lamp: bakeIsoSprite(lampModel(), Z),
     trees: [0, 1, 2].map((seed) => bakeIsoSprite(treeModel(seed * 7 + 3), Z)),
+    containers: CONTAINER_COLORS.map(([body, shade]) =>
+      bakeIsoSprite(containerModel(body, shade), Z)
+    ),
+    forklift: bakeIsoSprite(forkliftModel(), Z),
     bollard: bakeIsoSprite(bollardModel(), Z),
     vehicles: VEHICLE_KINDS.map((k, i) => bakeIsoSprite(vehicleModel(k, i), Z)),
     vehiclesSide: VEHICLE_KINDS.map((k, i) =>
@@ -223,6 +262,9 @@ export interface HarborState {
   rampStow: number
   /** Door plate seal progress, 0 open .. 1 sealed; runs after the ramp. */
   doorSeal: number
+  /** Cargo rolling off at the destination berth (nose dist along −gy). */
+  unload: Vehicle[]
+  unloadTimer: number
 }
 
 function makeVehicle(sprite: number, dist: number): Vehicle {
@@ -242,7 +284,14 @@ export function createHarborState(): HarborState {
   for (let i = 0; i < seeds.length; i++) {
     vehicles.push(makeVehicle(i % VEHICLE_KINDS.length, seeds[i]))
   }
-  return { vehicles, spawnTimer: 2, rampStow: 0, doorSeal: 0 }
+  return {
+    vehicles,
+    spawnTimer: 2,
+    rampStow: 0,
+    doorSeal: 0,
+    unload: [],
+    unloadTimer: 2,
+  }
 }
 
 const VEH_MAX_SPEED = 16
@@ -301,6 +350,73 @@ export function updateHarbor(s: SceneState, dt: number) {
     h.doorSeal = Math.min(1, h.doorSeal + dt / DOOR_SEAL_DUR)
   } else if (!sealing) {
     h.doorSeal = Math.max(0, h.doorSeal - dt / DOOR_SEAL_DUR)
+  }
+}
+
+/**
+ * Destination unloading: once moored, cargo trucks roll out of the ship's
+ * camera-hidden port-side door, across the side bridge and away up the pad's
+ * unload road — emerging from behind the hull, which sells the door without
+ * painting one. Stateless beyond the queue; cleared while not docked so the
+ * flow restarts on every arrival.
+ */
+const UNLOAD_KINDS = [2, 6, 1, 7] // trucks + vans haul the migration cargo
+
+export function updateDestination(s: SceneState, dt: number) {
+  const h = s.harbor
+  if (s.stage !== "docked") {
+    h.unload.length = 0
+    h.unloadTimer = 2
+    return
+  }
+
+  for (let i = h.unload.length - 1; i >= 0; i--) {
+    const v = h.unload[i]
+    const ahead = i > 0 ? h.unload[i - 1] : null
+    const limit = ahead
+      ? ahead.dist - ahead.len - VEH_GAP
+      : UNLOAD_END + v.len + 6
+    const target = Math.max(
+      0,
+      Math.min(VEH_MAX_SPEED * 0.8, (limit - v.dist) * 2.5)
+    )
+    v.speed += (target - v.speed) * Math.min(1, dt * 4)
+    v.dist += v.speed * dt
+    // Despawn only once the tail is fully past the gate plane — until then
+    // the clip corridor swallows the sprite pixel by pixel.
+    if (v.dist >= UNLOAD_END + v.len + 2) h.unload.splice(i, 1)
+  }
+
+  h.unloadTimer -= dt
+  if (h.unloadTimer <= 0 && h.unload.length < 4) {
+    const tail = h.unload[h.unload.length - 1]
+    if (!tail || tail.dist - tail.len > VEH_GAP + 6) {
+      h.unload.push(
+        makeVehicle(
+          UNLOAD_KINDS[Math.floor(Math.random() * UNLOAD_KINDS.length)],
+          0
+        )
+      )
+      h.unloadTimer = 2.5 + Math.random() * 2.5
+    } else {
+      h.unloadTimer = 0.5
+    }
+  }
+}
+
+/** Unload path: down the bridge from the door sill, then inland along −gy. */
+function destPathPoint(dist: number): {
+  x: number
+  y: number
+  z: number
+  heading: "x" | "-y"
+} {
+  const t = Math.min(1, dist / UNLOAD_BRIDGE_LEN)
+  return {
+    x: BRIDGE_X,
+    y: BRIDGE_SHIP_Y - dist,
+    z: DOOR_Z * (1 - t),
+    heading: "-y",
   }
 }
 
@@ -489,67 +605,146 @@ export function drawDestinationBack(
   ctx.globalAlpha = a
   const SITE = DEST_SITE
 
+  // One big concrete quay, like the departure harbor: painted unload road
+  // from the bridge foot up through the gate, a cross lane, marked yards.
   blitSprite(
     ctx,
     h.destQuay,
     place(s, SITE, DEST_QUAY_G.x, DEST_QUAY_G.y, DEST_QUAY_G.z)
   )
-  drawReflections(ctx, s, SITE, -40, 140, -16, a)
+  drawReflections(ctx, s, SITE, -56, 66, -37, a)
 
-  // Terminal + the PR sign that flips green when the pull request is open.
-  // Dressing sits on the left stretch of quay the moored ship doesn't cover.
-  blitSprite(ctx, h.terminal, place(s, SITE, -34, -56, 0))
+  // Arrivals terminal on the upper quay; the live status sign stands on a
+  // billboard near the berth, flipping green when the PR opens.
+  blitSprite(ctx, h.terminal, place(s, SITE, -96, -112, 0))
+  drawSign(ctx, s, place(s, SITE, -73, -104, 21), "ARRIVALS", "#c6d0e6")
   drawSign(
     ctx,
     s,
-    place(s, SITE, -11, -48, 18),
-    s.voyage.prReady ? "PR READY" : "ARRIVING",
+    place(s, SITE, -44, -48, 12),
+    s.voyage.prReady ? "PR READY" : "UNLOADING",
     s.voyage.prReady ? "#52d273" : "#f2c14e"
   )
 
+  // Greenery strips between the yards and the waterfront.
+  blitSprite(ctx, h.trees[0], place(s, SITE, -46, -118, 0))
+  blitSprite(ctx, h.trees[1], place(s, SITE, -120, -96, 0))
+  blitSprite(ctx, h.trees[2], place(s, SITE, -64, -52, 0))
+
+  // Container yards either side of the unload road, with a forklift working
+  // the stacks.
+  blitSprite(ctx, h.containers[0], place(s, SITE, 34, -88, 0))
+  blitSprite(ctx, h.containers[1], place(s, SITE, 52, -88, 0))
+  blitSprite(ctx, h.containers[2], place(s, SITE, 34, -88, 7))
+  blitSprite(ctx, h.containers[2], place(s, SITE, 44, -70, 0))
+  blitSprite(ctx, h.containers[1], place(s, SITE, -78, -84, 0))
+  blitSprite(ctx, h.containers[0], place(s, SITE, -60, -84, 0))
+  blitSprite(ctx, h.containers[0], place(s, SITE, -78, -84, 7))
+  // Forklift working the right-hand stacks, off the unload road (road spans
+  // gx 9..19) so the cargo trucks don't drive through it.
+  blitSprite(ctx, h.forklift, place(s, SITE, 24, -80, 0))
+
+  // Lamps along the berth apron and one at the gate.
   const lampsAt: Array<[number, number]> = [
-    [-54, -20],
-    [-30, -20],
+    [-52, -40],
+    [-16, -40],
+    [44, -40],
+    [34, -96],
   ]
   for (let i = 0; i < lampsAt.length; i++) {
     const [gx, gy] = lampsAt[i]
     blitSprite(ctx, h.lamp, place(s, SITE, gx, gy, 0))
     drawLampGlow(ctx, s, place(s, SITE, gx, gy, 15), i + 2, a)
   }
-  blitSprite(ctx, h.trees[0], place(s, SITE, -48, -70, 0))
-  blitSprite(ctx, h.trees[2], place(s, SITE, 16, -62, 0))
 
-  ctx.globalAlpha = 1
-}
-
-export function drawDestinationFront(
-  ctx: CanvasRenderingContext2D,
-  s: SceneState,
-  h: HarborScene,
-  a = 1
-) {
-  if (a <= 0.01) return
-  ctx.globalAlpha = a
-  const SITE = DEST_SITE
-
-  // Bollards on the quay lip; mooring lines once the ship is alongside.
-  blitSprite(ctx, h.bollard, place(s, SITE, -6, -16, 0))
-  blitSprite(ctx, h.bollard, place(s, SITE, 28, -16, 0))
+  // Mooring: bollards on the pad lip, lines up to the hull once alongside.
+  // Back layer on purpose — the ropes vanish at the hull silhouette.
+  blitSprite(ctx, h.bollard, place(s, SITE, -8, -38, 0))
+  blitSprite(ctx, h.bollard, place(s, SITE, 36, -38, 0))
   if (s.shipG > -2) {
     const lines: Array<[number, number, number, number, number, number]> = [
-      [-6, -16, 1, 2, -12, 11],
-      [28, -16, 1, 34, -12, 11],
+      [-8, -38, 1, 0, -14, 11],
+      [36, -38, 1, 44, -14, 11],
     ]
     for (const [gx0, gy0, gz0, gx1, gy1, gz1] of lines) {
       const p0 = place(s, SITE, gx0, gy0, gz0)
-      const mid = place(s, SITE, (gx0 + gx1) / 2, (gy0 + gy1) / 2, (gz0 + gz1) / 2 - 1.5)
+      const mid = place(
+        s,
+        SITE,
+        (gx0 + gx1) / 2,
+        (gy0 + gy1) / 2,
+        (gz0 + gz1) / 2 - 1.5
+      )
       const p1 = place(s, SITE, gx1, gy1, gz1)
       ropeArc(ctx, p0, mid, p1, "#cdb88c")
     }
   }
 
+  // Side cargo bridge + the trucks rolling off across it. Drawn behind the
+  // ship sprite, so each truck emerges from behind the hull — reading as
+  // driving out of the ship's far-side door. The clip corridor ends at the
+  // gate plane, so trucks vanish pixel by pixel into the gatehouse.
+  drawSideBridge(ctx, s)
+  if (s.harbor.unload.length > 0) {
+    ctx.save()
+    clipUnloadCorridor(ctx, s)
+    for (const v of s.harbor.unload) {
+      drawVehicleAt(ctx, s, SITE, h, v, destPathPoint(v.dist), a)
+    }
+    ctx.restore()
+  }
+
+  // The exit gatehouse straddling the road (drawn over the vanishing point).
+  blitSprite(ctx, h.gate, place(s, SITE, BRIDGE_X - 9, GATE_Y - 2, 0))
+
   ctx.globalAlpha = 1
 }
+
+/**
+ * Clip to the unload corridor: the road swept from just behind the ship's
+ * side door up to the gate plane (gy = GATE_Y). Truck pixels past the gate
+ * fall outside and disappear exactly under the gatehouse beam.
+ */
+function clipUnloadCorridor(ctx: CanvasRenderingContext2D, s: SceneState) {
+  const W = 8
+  const H = 16
+  const FY = BRIDGE_SHIP_Y + 8
+  const pts: Array<[number, number, number]> = [
+    [BRIDGE_X - W, GATE_Y, H],
+    [BRIDGE_X + W, GATE_Y, H],
+    [BRIDGE_X + W, GATE_Y, 0],
+    [BRIDGE_X + W, FY, 0],
+    [BRIDGE_X - W, FY, 0],
+    [BRIDGE_X - W, FY, H],
+  ]
+  ctx.beginPath()
+  for (let i = 0; i < pts.length; i++) {
+    const p = place(s, DEST_SITE, pts[i][0], pts[i][1], pts[i][2])
+    if (i === 0) ctx.moveTo(p.x, p.y)
+    else ctx.lineTo(p.x, p.y)
+  }
+  ctx.closePath()
+  ctx.clip()
+}
+
+/** The flat cargo bridge from the pad's berth edge up to the hidden side
+ *  door: deck strips with a lighter drive lane and raised curb rails. */
+function drawSideBridge(ctx: CanvasRenderingContext2D, s: SceneState) {
+  const SITE = DEST_SITE
+  for (let g = -BRIDGE_HALF_W; g <= BRIDGE_HALF_W; g++) {
+    const edge = Math.abs(g) >= BRIDGE_HALF_W - 1
+    const lane = Math.abs(g) <= 1
+    const a = place(s, SITE, BRIDGE_X + g, BRIDGE_PAD_Y, 0)
+    const b = place(s, SITE, BRIDGE_X + g, BRIDGE_SHIP_Y, DOOR_Z)
+    isoBand(ctx, a, b, edge ? "#2c3a5e" : lane ? "#4a5c92" : "#3b4c78")
+  }
+  for (const g of [-BRIDGE_HALF_W, BRIDGE_HALF_W]) {
+    const a = place(s, SITE, BRIDGE_X + g, BRIDGE_PAD_Y, 1)
+    const b = place(s, SITE, BRIDGE_X + g, BRIDGE_SHIP_Y, DOOR_Z + 1)
+    isoBand(ctx, a, b, "#8e9cbd")
+  }
+}
+
 
 /** Two slack mooring lines from quay bollards up to the hull. */
 function drawMooringLines(
@@ -598,7 +793,18 @@ function drawVehicle(
   v: Vehicle,
   a = 1
 ) {
-  const p = pathPoint(v.dist)
+  drawVehicleAt(ctx, s, site, h, v, pathPoint(v.dist), a)
+}
+
+function drawVehicleAt(
+  ctx: CanvasRenderingContext2D,
+  s: SceneState,
+  site: HarborSite,
+  h: HarborScene,
+  v: Vehicle,
+  p: ReturnType<typeof pathPoint>,
+  a = 1
+) {
   let at: { x: number; y: number }
   let sprite: IsoSprite
   if (p.heading === "-y") {
