@@ -239,7 +239,7 @@ function RunReady({
           "shrink-0 transition-all duration-700 ease-out",
           loading
             ? "pointer-events-none max-h-0 -translate-y-4 opacity-0"
-            : "max-h-[16rem] opacity-100"
+            : "max-h-64 opacity-100"
         )}
       >
         <RunHeader
