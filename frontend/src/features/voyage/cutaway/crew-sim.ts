@@ -24,6 +24,12 @@ import {
   CREW_W,
   drawCrewSprite,
 } from "./crew-art"
+import { PIXEL_FONT_H, drawPixelText, pixelTextWidth } from "./pixel-font"
+
+/** Speech bubble: word-wrap cap + how long a line of text holds on screen. */
+const BUBBLE_MAX_CHARS = 16
+const BUBBLE_MAX_LINES = 3
+const SPEAK_DUR = 4 // seconds a text bubble stays up (longer than the meet-up)
 
 const WALK_SPEED = 5 // model cells / second
 const TALK_DUR = 3 // seconds a "speech" interaction holds
@@ -62,7 +68,7 @@ interface CrewAgent {
   frameT: number
   accent: string
   status: AgentRunStatus
-  bubble: { color: string; until: number } | null
+  bubble: { color: string; until: number; lines?: string[] } | null
 }
 
 let agents: CrewAgent[] | null = null
@@ -74,6 +80,46 @@ let reducedMotion: MediaQueryList | null = null
 
 function rand(a: number, b: number): number {
   return a + Math.random() * (b - a)
+}
+
+/**
+ * Turn a log summary into a few short upper-case lines for the speech bubble.
+ * The pixel font only carries caps/digits and a little punctuation, so we strip
+ * anything unrenderable, word-wrap to BUBBLE_MAX_CHARS, and cap the height —
+ * a trailing line is elided with "..." when the summary runs long.
+ */
+function wrapBubbleText(summary: string): string[] {
+  const clean = summary
+    .toUpperCase()
+    .replace(/[^A-Z0-9 .\-#/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!clean) return []
+  const words = clean.split(" ")
+  const lines: string[] = []
+  let line = ""
+  let truncated = false
+  for (let i = 0; i < words.length; i++) {
+    let w = words[i]
+    if (w.length > BUBBLE_MAX_CHARS) w = w.slice(0, BUBBLE_MAX_CHARS)
+    const next = line ? `${line} ${w}` : w
+    if (next.length > BUBBLE_MAX_CHARS && line) {
+      if (lines.length === BUBBLE_MAX_LINES - 1) {
+        truncated = true
+        break // current `line` is the last; remaining words are dropped
+      }
+      lines.push(line)
+      line = w
+    } else {
+      line = next
+    }
+  }
+  if (line && lines.length < BUBBLE_MAX_LINES) lines.push(line)
+  if (truncated && lines.length) {
+    const last = lines.length - 1
+    lines[last] = `${lines[last].slice(0, BUBBLE_MAX_CHARS - 3)}...`
+  }
+  return lines
 }
 
 function agentColorVar(agent: AgentKey): string {
@@ -168,22 +214,28 @@ function trigger(m: AgentMessageVM, now: number) {
   if (!sender) return
   const color = TYPE_COLOR[m.type]
   const recip = m.targetAgent ? find(m.targetAgent) : undefined
+  const lines = wrapBubbleText(m.summary)
+  // The text bubble lingers a touch longer than the meet-up so it stays
+  // readable; falls back to TALK_DUR when the summary has nothing to show.
+  const speakUntil = now + (lines.length ? SPEAK_DUR : TALK_DUR)
 
   if (recip && PAIR_TYPES.has(m.type) && recip.room === sender.room) {
     // Same room: the two walk together and face off.
     const mid = (sender.x + recip.x) / 2
     sender.targetX = Math.min(sender.maxX, Math.max(sender.minX, mid - 0.9))
     recip.targetX = Math.min(recip.maxX, Math.max(recip.minX, mid + 0.9))
-    for (const a of [sender, recip]) {
-      a.mode = "talk"
-      a.timer = TALK_DUR
-      a.bubble = { color, until: now + TALK_DUR }
-    }
-  } else {
-    // Solo / cross-room: raise the chip in place.
     sender.mode = "talk"
     sender.timer = TALK_DUR
-    sender.bubble = { color, until: now + TALK_DUR }
+    sender.bubble = { color, until: speakUntil, lines }
+    // The listener turns up but only shows a small chip, not a duplicate line.
+    recip.mode = "talk"
+    recip.timer = TALK_DUR
+    recip.bubble = { color, until: now + TALK_DUR }
+  } else {
+    // Solo / cross-room: the sender speaks in place; any recipient blinks a chip.
+    sender.mode = "talk"
+    sender.timer = TALK_DUR
+    sender.bubble = { color, until: speakUntil, lines }
     if (recip) {
       recip.bubble = { color, until: now + TALK_DUR }
     }
@@ -247,7 +299,8 @@ function frameFor(a: CrewAgent): string[] {
   return CREW_FRAMES.idle
 }
 
-function drawBubble(
+/** Small colored chip — used for a listener who isn't the one "speaking". */
+function drawChip(
   ctx: CanvasRenderingContext2D,
   cx: number,
   baseY: number,
@@ -269,6 +322,59 @@ function drawBubble(
   // Little tail.
   ctx.fillStyle = "#0d142e"
   ctx.fillRect(Math.round(cx - 1), y + h, 2, Math.max(1, pad))
+}
+
+/**
+ * Game-style speech bubble: dark rounded-ish box outlined in the message's
+ * type color, the wrapped log text inside, and a little tail pointing down at
+ * the character's head. Sits centered above (cx) with its base at (baseY).
+ */
+function drawSpeechBubble(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  baseY: number,
+  color: string,
+  u: number,
+  lines: string[]
+) {
+  const s = Math.max(1, Math.round(u))
+  const pad = 2 * s
+  const lineGap = 2 * s
+  const lineH = PIXEL_FONT_H * s
+  let textW = 0
+  for (const l of lines) textW = Math.max(textW, pixelTextWidth(l, s))
+  const w = textW + pad * 2
+  const h = lines.length * lineH + (lines.length - 1) * lineGap + pad * 2
+  const x = Math.round(cx - w / 2)
+  const y = Math.round(baseY - h)
+
+  // Outline (message color) + dark fill.
+  ctx.fillStyle = color
+  ctx.fillRect(x - s, y - s, w + 2 * s, h + 2 * s)
+  ctx.fillStyle = "#0d142e"
+  ctx.fillRect(x, y, w, h)
+
+  // Tail: a colored nub stepping down to the head.
+  const tailX = Math.round(cx - s)
+  ctx.fillStyle = color
+  ctx.fillRect(tailX - s, y + h, 4 * s, s)
+  ctx.fillStyle = "#0d142e"
+  ctx.fillRect(tailX, y + h, 2 * s, s)
+  ctx.fillStyle = color
+  ctx.fillRect(tailX, y + h + s, 2 * s, s)
+
+  // Text, each line centered.
+  for (let i = 0; i < lines.length; i++) {
+    const lw = pixelTextWidth(lines[i], s)
+    drawPixelText(
+      ctx,
+      lines[i],
+      cx - lw / 2,
+      y + pad + i * (lineH + lineGap),
+      "#eef2ff",
+      s
+    )
+  }
 }
 
 /**
@@ -322,7 +428,12 @@ export function drawCrew(
     drawCrewSprite(ctx, frameFor(a), left, top, u, a.accent, a.accent, a.flip)
 
     if (a.bubble && now < a.bubble.until) {
-      drawBubble(ctx, centerX, top - Math.round(u), a.bubble.color, u)
+      const bubbleY = top - Math.round(u)
+      if (a.bubble.lines && a.bubble.lines.length) {
+        drawSpeechBubble(ctx, centerX, bubbleY, a.bubble.color, u, a.bubble.lines)
+      } else {
+        drawChip(ctx, centerX, bubbleY, a.bubble.color, u)
+      }
     }
   }
   ctx.restore()
