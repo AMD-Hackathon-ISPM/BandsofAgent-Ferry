@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils"
 import { deriveVoyage, type VoyageStatus } from "./progress"
 import { useVoyageScene } from "./use-voyage-scene"
 import { ShipLog } from "./ship-log"
+import { CrewRoster } from "./crew-roster"
+import { setCrewMessages, setCrewRuntime } from "./cutaway/crew-sim"
 
 /**
  * Dev-only scene override: append ?stage=dock|sail|arrived to force the
@@ -80,6 +82,15 @@ export function VoyageView(props: {
     introDock: intro,
   })
 
+  // Feed the canvas crew sim (positions/interactions are drawn on the cutaway
+  // by the scene's rAF loop, so this only hands it the latest run data).
+  React.useEffect(() => {
+    setCrewRuntime(run.agents)
+  }, [run.agents])
+  React.useEffect(() => {
+    setCrewMessages(messages)
+  }, [messages])
+
   return (
     <section
       className={cn("absolute inset-0 overflow-hidden", className)}
@@ -117,6 +128,7 @@ export function VoyageView(props: {
       {showLog && !intro && (
         <ShipLog messages={messages} streamedIds={streamedIds} />
       )}
+      {!intro && <CrewRoster run={run} visible={inspecting} />}
       {!intro && voyage.mode === "arrived" && run.pr && (
         <ArrivalPopup run={run} pr={run.pr} />
       )}

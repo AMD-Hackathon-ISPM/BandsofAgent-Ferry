@@ -24,6 +24,7 @@ import {
 } from "./voxel/voxel-render"
 import { CUTAWAY_PZ, getInteriorCanvas } from "./cutaway/cutaway-render"
 import { drawInteriorAnimations } from "./cutaway/interior-art"
+import { drawCrew } from "./cutaway/crew-sim"
 
 const TWO_PI = Math.PI * 2
 /** Port profile, bow pointing left. */
@@ -499,6 +500,8 @@ export function drawInspect(
       performance.now() / 1000,
       ins.reveal
     )
+    // Crew characters roaming the decks, over the interior, under the shell.
+    drawCrew(ctx, ix, iy, zoom, ins.reveal)
     ctx.globalAlpha = Math.max(0, 1 - ins.reveal)
   }
   ctx.drawImage(target.canvas, ox - BUF_W / 2, oy - BUF_H / 2)
