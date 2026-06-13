@@ -5,6 +5,7 @@ import { SEA_VX, SEA_VY } from "./sea"
 import { FERRY_ANCHOR, FERRY_STERN } from "./sprites"
 import type { VoyageStatus } from "./progress"
 import type { InspectState } from "./inspect"
+import { createSky, updateSky, type SkyState } from "./sky"
 import {
   createHarborState,
   departShipOffscreen,
@@ -71,6 +72,7 @@ export interface SceneState {
   voyage: VoyageStatus
   wake: Particle[]
   wakeTimer: number
+  sky: SkyState
   /** Ship blit rect in art px, refreshed by render; used for click hit-tests. */
   shipRect: { x: number; y: number; w: number; h: number }
   /** Live prop-inspection state while mode === "inspect". */
@@ -165,6 +167,7 @@ export function createScene(): SceneState {
     },
     wake: [],
     wakeTimer: 0,
+    sky: createSky(),
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
     inspect: null,
     keys: new Set(),
@@ -396,4 +399,5 @@ export function updateScene(s: SceneState, dt: number) {
     p.x += p.vx * dt
     p.y += p.vy * dt
   }
+  updateSky(s, dt)
 }

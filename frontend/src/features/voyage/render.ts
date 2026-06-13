@@ -7,6 +7,7 @@
 // top-right on arrival, and the small at-sea ferry holds the center between.
 
 import { drawSea } from "./sea"
+import { drawSkyShadows, drawSkyTops } from "./sky"
 import { shipBlitPos, shipBobOffset, type SceneState } from "./scene"
 import type { Sprites } from "./sprites"
 import { drawInspect } from "./inspect"
@@ -43,6 +44,7 @@ function drawSeaScene(
   harborFerry: FerryBakeAt
 ) {
   drawSea(ctx, s, sprites)
+  if (s.mode === "sea") drawSkyShadows(ctx, s, sprites)
 
   // Loading harbor (bottom-left): big berthed ferry between its back/front
   // prop layers; the ship slides off up-right on departure, then the props
@@ -109,4 +111,5 @@ function drawSeaScene(
       ctx.globalAlpha = 1
     }
   }
+  if (s.mode === "sea") drawSkyTops(ctx, s, sprites)
 }

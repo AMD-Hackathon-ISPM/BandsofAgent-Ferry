@@ -3,7 +3,14 @@
 // (tone ramps + checkerboard dither) — nothing is lit at runtime, so drawing
 // a "shaded" sprite costs the same as a flat one.
 
-import { makeWaveTiles, makeWhitecaps, type WaveTiles } from "./sea"
+import {
+  makeSwellTiles,
+  makeWaveTiles,
+  makeWhitecaps,
+  type SwellTiles,
+  type WaveTiles,
+} from "./sea"
+import { makeBirdShadow, makeCloudShadows, makeGullFrames } from "./sky"
 import { bakeFerrySprites, FERRY_GEOM } from "./voxel/bake"
 import { getFerryModel } from "./voxel/ferry-model"
 import type { VoxelModel } from "./voxel/voxel-grid"
@@ -113,7 +120,11 @@ export interface Sprites {
   ferryModel: VoxelModel
   foam: HTMLCanvasElement[]
   waves: WaveTiles
+  swell: SwellTiles
   whitecaps: HTMLCanvasElement[]
+  cloudShadows: HTMLCanvasElement[]
+  gulls: HTMLCanvasElement[]
+  birdShadow: HTMLCanvasElement
 }
 
 export function bakeSprites(): Sprites {
@@ -124,6 +135,10 @@ export function bakeSprites(): Sprites {
     ferryModel: getFerryModel(),
     foam: FOAM_FRAMES.map(bakeSprite),
     waves: makeWaveTiles(),
+    swell: makeSwellTiles(),
     whitecaps: makeWhitecaps(),
+    cloudShadows: makeCloudShadows(),
+    gulls: makeGullFrames(),
+    birdShadow: makeBirdShadow(),
   }
 }
