@@ -12,7 +12,7 @@ import {
   IconShip,
 } from "@tabler/icons-react"
 
-import { canApprove } from "@/lib/domain"
+import { canApprove, isLive } from "@/lib/domain"
 import type { AgentKey, PhaseKey } from "@/lib/domain"
 import { fetchRun } from "@/lib/api"
 import { useLiveRun, useMediaQuery, useNow } from "@/lib/hooks"
@@ -103,6 +103,10 @@ export function RunView() {
   } = useQuery({
     queryKey: ["run", runId],
     queryFn: () => fetchRun(runId),
+    // While the run is live, poll so artifacts / PR / db-plan appear on their
+    // own (messages stream over SSE; these other outputs come from the run doc).
+    refetchInterval: (query) =>
+      query.state.data && isLive(query.state.data.status) ? 4000 : false,
   })
 
   if (isPending) return <RunSkeleton />

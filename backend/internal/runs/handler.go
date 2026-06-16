@@ -626,7 +626,7 @@ func (h *Handler) PublishMessage(ctx context.Context, runID string, msg AgentMes
 
 func (h *Handler) fetchArtifacts(ctx context.Context, companyID, runID uuid.UUID) ([]artifactVM, error) {
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, artifact_type, file_name, file_size, COALESCE(generated_by, '')
+		SELECT id, artifact_type, file_name, file_size, COALESCE(generated_by, ''), COALESCE(metadata, '{}')
 		FROM generated_artifacts
 		WHERE company_id = $1 AND migration_run_id = $2
 		ORDER BY created_at ASC
@@ -641,16 +641,27 @@ func (h *Handler) fetchArtifacts(ctx context.Context, companyID, runID uuid.UUID
 		var id uuid.UUID
 		var artType, fileName, generatedBy string
 		var fileSize int64
-		if err := rows.Scan(&id, &artType, &fileName, &fileSize, &generatedBy); err != nil {
+		var metaJSON []byte
+		if err := rows.Scan(&id, &artType, &fileName, &fileSize, &generatedBy, &metaJSON); err != nil {
 			continue
 		}
-		artifacts = append(artifacts, artifactVM{
+		a := artifactVM{
 			ID:        id.String(),
 			Type:      artType,
 			FileName:  fileName,
 			SizeBytes: fileSize,
 			CreatedBy: generatedBy,
-		})
+		}
+		if len(metaJSON) > 0 {
+			var meta struct {
+				Preview string `json:"preview"`
+			}
+			if json.Unmarshal(metaJSON, &meta) == nil && meta.Preview != "" {
+				p := meta.Preview
+				a.Preview = &p
+			}
+		}
+		artifacts = append(artifacts, a)
 	}
 	return artifacts, nil
 }

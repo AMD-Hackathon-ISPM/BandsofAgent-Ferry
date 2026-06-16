@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -104,6 +105,11 @@ type GitHubConfig struct {
 	ClientID     string
 	ClientSecret string
 	RedirectURI  string
+	// GitHub App identity, used to mint short-lived per-repo installation tokens
+	// for pushing (no PATs). AppPrivateKey is the PEM contents.
+	AppID         string
+	AppSlug       string
+	AppPrivateKey string
 }
 
 type LoggingConfig struct {
@@ -246,10 +252,13 @@ func Load() (*Config, error) {
 			Endpoint:    getEnv("MODEL_ENDPOINT", ""),
 		},
 		GitHub: GitHubConfig{
-			PAT:          getEnv("GITHUB_PAT", ""),
-			ClientID:     getEnv("GITHUB_CLIENT_ID", ""),
-			ClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
-			RedirectURI:  getEnv("GITHUB_REDIRECT_URI", "http://localhost:8080/auth/github/callback"),
+			PAT:           getEnv("GITHUB_PAT", ""),
+			ClientID:      getEnv("GITHUB_CLIENT_ID", ""),
+			ClientSecret:  getEnv("GITHUB_CLIENT_SECRET", ""),
+			RedirectURI:   getEnv("GITHUB_REDIRECT_URI", "http://localhost:8080/auth/github/callback"),
+			AppID:         getEnv("GITHUB_APP_ID", ""),
+			AppSlug:       getEnv("GITHUB_APP_SLUG", ""),
+			AppPrivateKey: githubAppPrivateKey(),
 		},
 		Logging: LoggingConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
@@ -374,6 +383,20 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// githubAppPrivateKey resolves the GitHub App PEM from either a file path
+// (GITHUB_APP_PRIVATE_KEY_PATH — easiest, no escaping) or an inline value
+// (GITHUB_APP_PRIVATE_KEY, where literal "\n" escapes are expanded so the PEM
+// fits on one .env line). The file path takes precedence when readable.
+func githubAppPrivateKey() string {
+	if path := os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"); path != "" {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			return string(b)
+		}
+		log.Printf("config: GITHUB_APP_PRIVATE_KEY_PATH=%q could not be read; falling back to GITHUB_APP_PRIVATE_KEY", path)
+	}
+	return strings.ReplaceAll(os.Getenv("GITHUB_APP_PRIVATE_KEY"), `\n`, "\n")
 }
 
 func getEnvAsInt(key string, defaultValue int) int {

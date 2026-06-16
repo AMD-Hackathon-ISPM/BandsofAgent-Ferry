@@ -285,4 +285,36 @@ export async function fetchRepoSuggestions(
   }
 }
 
+export interface AppInstallation {
+  installed: boolean
+  installUrl: string
+}
+
+/**
+ * Reports whether the Ferry GitHub App is installed on a repo (so it can push),
+ * and where to install it. Returns installed=true when the App isn't configured
+ * server-side, so the launch flow isn't blocked in that case.
+ */
+export async function fetchAppInstallation(
+  accessToken: string,
+  repo: string,
+): Promise<AppInstallation> {
+  if (USE_DUMMY_DATA) return { installed: true, installUrl: "" }
+
+  try {
+    const resp = await fetch(
+      `${API_URL}/api/github/app/installation?repo=${encodeURIComponent(repo)}`,
+      {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    )
+    if (!resp.ok) return { installed: true, installUrl: "" }
+    return (await resp.json()) as AppInstallation
+  } catch {
+    // On a check failure, don't block launch — the PR step still has fallbacks.
+    return { installed: true, installUrl: "" }
+  }
+}
+
 export { API_URL }

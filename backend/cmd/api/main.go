@@ -24,6 +24,7 @@ import (
 	migratepkg "github.com/ferry/backend/internal/migrate"
 	"github.com/ferry/backend/migrations"
 	runspkg "github.com/ferry/backend/internal/runs"
+	"github.com/ferry/backend/internal/storage"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -68,7 +69,13 @@ func main() {
 
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
-	ghAPIHandler := ghpkg.NewHandler(rdb, cfg.GitHub.PAT)
+	ghApp, err := ghpkg.NewApp(cfg.GitHub.AppID, cfg.GitHub.AppSlug, cfg.GitHub.AppPrivateKey)
+	if err != nil {
+		log.Printf("github app disabled: %v", err)
+	} else if ghApp != nil {
+		log.Printf("github app enabled (id %s)", cfg.GitHub.AppID)
+	}
+	ghAPIHandler := ghpkg.NewHandler(rdb, cfg.GitHub.PAT, ghApp)
 
 	bandService, err := band.NewService(&cfg.Band)
 	if err != nil {
@@ -78,9 +85,20 @@ func main() {
 	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService)
 	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents)
 
+	// Optional MinIO storage for generated files (best-effort: if it can't be
+	// reached, artifacts still surface via the inline DB preview).
+	var artifactStore *storage.MinIOClient
+	if store, err := storage.NewMinIOClient(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.BucketArtifacts, cfg.MinIO.UseSSL); err != nil {
+		log.Printf("minio: artifact storage disabled: %v", err)
+	} else if err := store.EnsureBucket(context.Background()); err != nil {
+		log.Printf("minio: ensure bucket failed, artifact storage disabled: %v", err)
+	} else {
+		artifactStore = store
+	}
+
 	// Mirror Band chat transcripts into agent_messages + Redis so the run
 	// timeline + SSE surface the agent collaboration in the frontend.
-	if mirror := bandmirror.New(pool, rdb, cfg); mirror != nil {
+	if mirror := bandmirror.New(pool, rdb, cfg, artifactStore); mirror != nil {
 		go mirror.Run(context.Background())
 	}
 
@@ -91,6 +109,7 @@ func main() {
 	mux.HandleFunc("/health", handleHealth(cfg))
 	mux.HandleFunc("/auth/github", ghHandler.HandleBegin)
 	mux.HandleFunc("/auth/github/callback", ghHandler.HandleCallback)
+	mux.HandleFunc("/auth/github/setup", ghHandler.HandleSetup)
 
 	// Protected routes
 	mux.Handle("/api/github/repos/resolve", authMiddleware.Authenticate(
@@ -98,6 +117,9 @@ func main() {
 	))
 	mux.Handle("/api/github/repos/suggestions", authMiddleware.Authenticate(
 		http.HandlerFunc(ghAPIHandler.ListSuggestions),
+	))
+	mux.Handle("/api/github/app/installation", authMiddleware.Authenticate(
+		http.HandlerFunc(ghAPIHandler.AppInstallation),
 	))
 
 	// Runs routes

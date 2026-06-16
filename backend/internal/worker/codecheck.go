@@ -95,18 +95,25 @@ func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bo
 		if !hasFile(files, "go.mod") {
 			prefix = "go mod init ferrygen >/dev/null 2>&1; "
 		}
-		script := fmt.Sprintf("%s%s 2>&1; echo \"---exit:$?\"", prefix, cmd)
-		return sandbox.Spec{Image: "golang:1.25-alpine", Files: files, Script: script, Timeout: 120 * time.Second}, true
+		// The sandbox rootfs is mounted read-only, so Go's default cache/state
+		// dirs under /root are unwritable. Point HOME and the Go caches at the
+		// /tmp tmpfs (rw) so the build cache can initialize.
+		env := "export HOME=/tmp GOCACHE=/tmp/.cache/go-build GOPATH=/tmp/go GOMODCACHE=/tmp/go/pkg/mod GOTMPDIR=/tmp; "
+		script := fmt.Sprintf("%s%s%s 2>&1; echo \"---exit:$?\"", env, prefix, cmd)
+		return sandbox.Spec{Image: "golang:1.25-alpine", Files: files, Script: script, Timeout: 180 * time.Second}, true
 	case "rust":
+		// Same read-only rootfs constraint: cargo writes to $CARGO_HOME (default
+		// /root/.cargo). Redirect HOME + CARGO_HOME into the /tmp tmpfs.
+		env := "export HOME=/tmp CARGO_HOME=/tmp/.cargo; "
 		cmd := "cargo build"
 		if mode == "test" {
 			cmd = "cargo test"
 		}
-		script := fmt.Sprintf("%s 2>&1; echo \"---exit:$?\"", cmd)
+		script := fmt.Sprintf("%s%s 2>&1; echo \"---exit:$?\"", env, cmd)
 		if !hasFile(files, "Cargo.toml") {
-			script = `for f in $(find . -name '*.rs'); do rustc --edition 2021 "$f" -o /tmp/out 2>&1; done; echo "---exit:$?"`
+			script = env + `for f in $(find . -name '*.rs'); do rustc --edition 2021 "$f" -o /tmp/out 2>&1; done; echo "---exit:$?"`
 		}
-		return sandbox.Spec{Image: "rust:1-alpine", Files: files, Script: script, Timeout: 150 * time.Second}, true
+		return sandbox.Spec{Image: "rust:1-alpine", Files: files, Script: script, Timeout: 240 * time.Second}, true
 	default:
 		return sandbox.Spec{}, false
 	}

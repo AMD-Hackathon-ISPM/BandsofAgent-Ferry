@@ -315,12 +315,13 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		}
 	}
 
-	if next, ok := w.roster[w.role.next]; ok && w.role.next != "" {
+	nextKey, note := w.resolveNext(output, &runCtx)
+	if next, ok := w.roster[nextKey]; ok && nextKey != "" {
 		content := output
 		if artifact != "" {
 			content += "\n\n" + artifact
 		}
-		content += fmt.Sprintf("\n\n@%s - please continue.\n\n%s", next.Handle, band.MarshalCtx(runCtx))
+		content += fmt.Sprintf("\n\n@%s - %s\n\n%s", next.Handle, note, band.MarshalCtx(runCtx))
 		mentions := []band.Mention{{ID: next.ID, Name: next.Name, Handle: next.Handle}}
 		if _, err := w.client.SendMessage(ctx, chatID, content, mentions); err != nil {
 			log.Printf("[%s] handoff to %s failed: %v", w.info.Key, next.Handle, err)
@@ -335,6 +336,36 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	if err := w.client.MarkProcessed(ctx, chatID, msg.ID); err != nil {
 		log.Printf("[%s] mark processed failed: %v", w.info.Key, err)
 	}
+}
+
+// maxReworks bounds how many times the Commander may bounce a run back to the
+// Code Generator before the pipeline is forced forward, so a persistently
+// failing migration can't loop the band forever.
+const maxReworks = 2
+
+// resolveNext picks the downstream agent and the handoff note. Most roles use a
+// static `next`, but the Commander branches on its verdict: NEEDS_REWORK loops
+// back to the Code Generator (until the rework budget is spent) while APPROVED
+// proceeds to the GitHub Connector.
+func (w *Worker) resolveNext(output string, rc *band.RunCtx) (string, string) {
+	if w.info.Key == "commander" && !commanderApproved(output) {
+		if rc.Rework < maxReworks {
+			rc.Rework++
+			return "code_generator", fmt.Sprintf(
+				"the migration needs rework (attempt %d of %d). Address the issues raised in the review above and regenerate the full set of files, then continue down the band.",
+				rc.Rework, maxReworks)
+		}
+		log.Printf("[%s] rework budget (%d) exhausted; proceeding to %s", w.info.Key, maxReworks, w.role.next)
+	}
+	return w.role.next, "please continue."
+}
+
+// commanderApproved reports whether the Commander's verdict is APPROVED rather
+// than NEEDS_REWORK. It is conservative: only an explicit rework verdict loops
+// the run back; anything else proceeds so the band can't stall on ambiguity.
+func commanderApproved(output string) bool {
+	u := strings.ToUpper(output)
+	return !strings.Contains(u, "NEEDS_REWORK") && !strings.Contains(u, "NEEDS REWORK")
 }
 
 func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, runCtx band.RunCtx, execReport string) string {
