@@ -496,7 +496,7 @@ function FolderPanel({
   return (
     <div
       className={cn(
-        "absolute inset-y-3 z-10 transition-[translate,opacity] duration-800 ease-in-out will-change-transform",
+        "absolute inset-y-3 z-10 transition-[translate,opacity] duration-250 ease-[cubic-bezier(0.23,1,0.32,1)] will-change-transform motion-reduce:transition-none",
         isLeft ? "left-3" : "right-3",
         !open &&
           (isLeft
@@ -537,7 +537,7 @@ function FolderPanel({
         />
         <Chevron
           className={cn(
-            "size-3.5 transition-transform duration-800 ease-in-out",
+            "size-3.5 transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
             !open && "rotate-180"
           )}
         />
