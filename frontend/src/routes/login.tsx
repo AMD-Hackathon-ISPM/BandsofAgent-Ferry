@@ -8,7 +8,7 @@ import { PHASES } from "@/lib/domain"
 import { useAuth } from "@/providers/auth-provider"
 import { AgentGlyph } from "@/features/migrations/components/agent"
 import { Dot } from "@/features/migrations/components/status-dot"
-import { WordText } from "@/components/brand"
+import { Logo } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -94,7 +94,7 @@ export function Login() {
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
       <div className="flex flex-col justify-between p-6 sm:p-10">
-        <WordText />
+        <Logo />
 
         <div className="mx-auto w-full max-w-sm py-10">
           <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">

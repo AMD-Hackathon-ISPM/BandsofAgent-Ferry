@@ -5,7 +5,7 @@ import { IconAlertTriangle } from "@tabler/icons-react"
 import type { Role } from "@/lib/domain"
 import type { User } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
-import { WordText } from "@/components/brand"
+import { Logo } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -52,7 +52,7 @@ export function AuthCallback() {
   if (error) {
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 text-center">
-        <WordText />
+        <Logo />
         <div className="flex max-w-sm flex-col items-center gap-3">
           <IconAlertTriangle className="size-5 text-warning" />
           <p className="text-sm font-medium">
@@ -75,7 +75,7 @@ export function AuthCallback() {
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 text-center">
-      <WordText />
+      <Logo />
       <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
         <Spinner />
         Finishing sign-in with GitHub

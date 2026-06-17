@@ -3,7 +3,7 @@ import { IconChevronDown, IconLogout } from "@tabler/icons-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
-import { WordText } from "@/components/brand"
+import { Logo } from "@/components/brand"
 import { useTheme, type Theme } from "@/components/theme-provider"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -90,7 +90,7 @@ export function TopBar({ className }: { className?: string }) {
     >
       <div className="flex items-center gap-3">
         <Link to="/" className="rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring">
-          <WordText />
+          <Logo />
         </Link>
         <span className="hidden h-4 w-px bg-border sm:block" />
         <span className="hidden text-xs text-muted-foreground sm:inline">Migration control</span>
