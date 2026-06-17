@@ -72,6 +72,11 @@ func BuildKickoffMessage(rc FerryRunContext, namespace string) string {
 		dbFile = "none"
 	}
 
+	sequence := "source analysis → business logic → code generation → DB migration → tests → review → command → GitHub PR"
+	if !rc.DBMigrationEnabled {
+		sequence = "source analysis → business logic → code generation → tests → review → command → GitHub PR (DB migration is disabled for this run — the DB Migrator is skipped)"
+	}
+
 	return fmt.Sprintf(`@%s/ferrysourceanalyzer
 
 Start Ferry migration run.
@@ -86,7 +91,7 @@ Database Migration Enabled: %t
 
 Database File: %s
 
-You are the first stage. Analyze the repository, then hand off to the next agent. The band proceeds in sequence: source analysis → business logic → code generation → DB migration → tests → review → command → GitHub PR. Each agent hands off to the next; do not mention the others now.
+You are the first stage. Analyze the repository, then hand off to the next agent. The band proceeds in sequence: %s. Each agent hands off to the next; do not mention the others now.
 
 %s`,
 		namespace,
@@ -95,6 +100,7 @@ You are the first stage. Analyze the repository, then hand off to the next agent
 		rc.TargetLanguage,
 		rc.DBMigrationEnabled,
 		dbFile,
-		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User, Run: rc.MigrationRunID}),
+		sequence,
+		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User, Run: rc.MigrationRunID, DBEnabled: rc.DBMigrationEnabled}),
 	)
 }

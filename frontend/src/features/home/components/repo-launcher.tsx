@@ -53,7 +53,7 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 type Phase = "idle" | "validating" | "resolved" | "error"
-type Reason = "format" | "access" | "unsupported" | "threshold"
+type Reason = "format" | "access" | "unsupported" | "threshold" | "auth"
 
 const ERROR_COPY: Record<Reason, string> = {
   format: "That does not look like a GitHub repository URL.",
@@ -62,6 +62,7 @@ const ERROR_COPY: Record<Reason, string> = {
   unsupported: "Ferry migrates COBOL, Java, and PHP.",
   threshold:
     "This repository is below the migration threshold and cannot be selected.",
+  auth: "Your session expired. Please sign in again.",
 }
 
 const RISK_TONE: Record<MigrationRisk["level"], string> = {
@@ -214,7 +215,7 @@ export function RepoLauncher({ className }: { className?: string }) {
     if (!repo || !accessToken || launching || installState === "needed") return
     setLaunching(true)
     try {
-      const result = await createRun(accessToken, `${repo.owner}/${repo.name}`, branch, source, target, dbEnabled)
+      const result = await createRun(accessToken, `${repo.owner}/${repo.name}`, branch, source, target, dbAvailable && dbEnabled)
       toast.success("Migration launched", {
         description: `${repo.owner}/${repo.name}@${branch} → ${target === "go" ? "Go" : "Rust"}. Assembling the band.`,
       })
@@ -235,6 +236,9 @@ export function RepoLauncher({ className }: { className?: string }) {
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
   }, [installState, repo, loadInstall])
+
+  const dbAvailable = repo?.dbMigration?.available ?? true
+  const dbLabel = repo?.dbMigration?.label ?? "MyISAM to InnoDB"
 
   const invalid = phase === "error"
 
@@ -426,6 +430,9 @@ export function RepoLauncher({ className }: { className?: string }) {
                 </span>
               </div>
 
+              <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Language migration
+              </span>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="source-lang">Source</FieldLabel>
@@ -473,20 +480,31 @@ export function RepoLauncher({ className }: { className?: string }) {
                 </Field>
               </div>
 
-              <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-                <label htmlFor="db-toggle" className="text-xs">
-                  <span className="block font-medium">
-                    Include database migration
-                  </span>
-                  <span className="block text-muted-foreground">
-                    MyISAM to InnoDB
-                  </span>
-                </label>
-                <Switch
-                  id="db-toggle"
-                  checked={dbEnabled}
-                  onCheckedChange={setDbEnabled}
-                />
+              <div className="flex flex-col gap-2 border-t border-border pt-3">
+                <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                  Database migration
+                </span>
+                <div
+                  className={cn(
+                    "flex items-center justify-between gap-3",
+                    !dbAvailable && "opacity-50"
+                  )}
+                >
+                  <label htmlFor="db-toggle" className="text-xs">
+                    <span className="block font-medium">
+                      Include database migration
+                    </span>
+                    <span className="block text-muted-foreground">
+                      {dbLabel}
+                    </span>
+                  </label>
+                  <Switch
+                    id="db-toggle"
+                    checked={dbAvailable && dbEnabled}
+                    onCheckedChange={setDbEnabled}
+                    disabled={!dbAvailable}
+                  />
+                </div>
               </div>
 
               {installState === "needed" ? (

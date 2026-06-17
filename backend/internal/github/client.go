@@ -20,8 +20,9 @@ type RepoInfo struct {
 	Language         string         `json:"language"`
 	DetectedLanguage string         `json:"detectedLanguage"`
 	DetectedLabel    string         `json:"detectedLabel"`
-	Risk             MigrationRisk  `json:"risk"`
-	Languages        map[string]int `json:"languages"`
+	Risk             MigrationRisk   `json:"risk"`
+	Languages        map[string]int  `json:"languages"`
+	DBMigration      DBMigrationInfo `json:"dbMigration"`
 }
 
 type MigrationRisk struct {
@@ -140,6 +141,7 @@ func (c *Client) ResolveRepo(ctx context.Context, owner, name string) (*RepoInfo
 		DetectedLabel:    label,
 		Risk:             risk,
 		Languages:        languages,
+		DBMigration:      c.DetectDBMigration(ctx, repo.Owner.Login, repo.Name, repo.DefaultBranch),
 	}, nil
 }
 

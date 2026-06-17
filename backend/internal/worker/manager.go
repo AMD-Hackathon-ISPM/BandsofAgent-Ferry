@@ -44,7 +44,8 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 	} else if ghApp != nil {
 		log.Printf("github app enabled (id %s) — PRs use per-repo installation tokens", cfg.GitHub.AppID)
 	}
-	source := NewSourceProvider(cfg.GitHub.PAT, rdb, ghApp)
+	ghTokens := github.NewUserTokens(rdb, cfg.GitHub.ClientID, cfg.GitHub.ClientSecret, cfg.GitHub.PAT)
+	source := NewSourceProvider(ghTokens, ghApp)
 
 	keyByID := make(map[string]string)
 	for key, a := range cfg.Band.Agents {

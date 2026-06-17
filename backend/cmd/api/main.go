@@ -75,7 +75,8 @@ func main() {
 	} else if ghApp != nil {
 		log.Printf("github app enabled (id %s)", cfg.GitHub.AppID)
 	}
-	ghAPIHandler := ghpkg.NewHandler(rdb, cfg.GitHub.PAT, ghApp)
+	ghTokens := ghpkg.NewUserTokens(rdb, cfg.GitHub.ClientID, cfg.GitHub.ClientSecret, cfg.GitHub.PAT)
+	ghAPIHandler := ghpkg.NewHandler(ghTokens, ghApp)
 
 	bandService, err := band.NewService(&cfg.Band)
 	if err != nil {
@@ -110,6 +111,11 @@ func main() {
 	mux.HandleFunc("/auth/github", ghHandler.HandleBegin)
 	mux.HandleFunc("/auth/github/callback", ghHandler.HandleCallback)
 	mux.HandleFunc("/auth/github/setup", ghHandler.HandleSetup)
+
+	// Token refresh — public (authenticates via the refresh token), lets the
+	// frontend recover an expired 15m access token without forcing re-login.
+	authHTTPHandler := auth.NewHTTPHandler(authService)
+	mux.HandleFunc("POST /api/auth/refresh", authHTTPHandler.HandleRefresh)
 
 	// Protected routes
 	mux.Handle("/api/github/repos/resolve", authMiddleware.Authenticate(
