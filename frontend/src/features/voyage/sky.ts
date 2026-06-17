@@ -37,8 +37,9 @@ const GULL_MAX_ALT = 22
 const FLOCK_MIN_ALT = 18
 const FLOCK_MAX_ALT = 30
 const CULL_MARGIN = 96
-const GULL_FRAME_W = 24
-const GULL_FRAME_H = 18
+const GULL_FRAME_W = 26
+const GULL_FRAME_H = 13
+const GULL_SCALE = 0.72
 
 function artCanvas(
   w: number,
@@ -124,8 +125,8 @@ function spawnGull(s: SceneState, flock = false, offsetX = 0, offsetY = 0) {
     alt,
     vx: rand(-14, -7) + (flock ? rand(-3, 3) : 0),
     vy: rand(3, 12) + (flock ? rand(-2, 4) : 0),
-    flap: flock ? rand(0.52, 0.72) : rand(0.58, 0.84),
-    scale: flock ? rand(0.75, 0.9) : rand(0.85, 1.05),
+    flap: flock ? rand(1.6, 2.2) : rand(1.8, 2.6),
+    scale: GULL_SCALE, // uniform — every gull renders the same small size
     seed: Math.floor(rand(0, 1000)),
     phase: rand(0, Math.PI * 2),
     turn: rand(0.68, 1.04),
@@ -175,93 +176,76 @@ function gullFrame(entity: SkyEntity, time: number): number {
 }
 
 /**
- * Hand-authored side-view seagull, facing LEFT (all gulls drift left, so no
- * runtime flip). White body, charcoal outline, dark wing, orange beak — a
- * pixel sprite that matches the rest of the scene's pixel density. Compact
- * body, big wings. Four frames span a flap cycle (wings down → mid → level →
- * up); the body sits at rows 7–11 in every frame so only the wing moves. 24×18.
- *   k outline   d dark grey wing   m mid grey   w light body   o beak
+ * Hand-authored top-down seagull seen from above, head/beak toward the
+ * bottom-left — the direction every gull drifts (down-left across the iso
+ * ocean), so no runtime flip is needed. Wings sweep out to black-tipped
+ * corners; a white tail fan fills the centre between the wing roots; a tiny
+ * orange beak pokes off the head. Matches the rest of the scene's pixel
+ * density. Four frames are a subtle flap, ordered by wing height: the tips
+ * raise from row 5 (DOWN) up to row 2 (UP) — gullFrame() maps a sine wave to
+ * this 0..3 order so the wings bob gently. 26×13.
+ *   k black wingtip + outline   d dark grey   m mid grey   w light body/tail   o beak
  */
 export function makeGullFrames(): HTMLCanvasElement[] {
   const DOWN = [
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "...kk...................",
-    ".okwkwwwwww..............",
-    ".owwwwwwwwwwmmk..........",
-    "..kwwwwwwwwwmmk..........",
-    "..kwwwwwwwkk.............",
-    "...kkwwwddk.............",
-    "....kddmmk..............",
-    "...kddmk................",
-    "..kddmk.................",
-    ".kkdmk..................",
-    ".kkk....................",
-    "........................",
+    "..........................",
+    "..........................",
+    "..........................",
+    "..........................",
+    "............ww............",
+    ".kkd.......wwww.......dkk.",
+    ".kkddmmm...wwww...mmmddkk.",
+    "....dmmmmwwwwwwwwmmmmd....",
+    "........mwwwwwwwwm........",
+    "...........www............",
+    "..........oww.............",
+    "..........o...............",
+    "..........................",
   ]
   const MID = [
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "...kk..............dk...",
-    "....k...........dddmk...",
-    ".okwkwwwwdddddmmmwwk....",
-    ".owwwwwwwwwwmmk..........",
-    "..kwwwwwwwwwmmk..........",
-    "..kwwwwwwwkk.............",
-    "...kkkkkkkk.............",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
+    "..........................",
+    "..........................",
+    "..........................",
+    "..........................",
+    ".kk.........ww.........kk.",
+    ".kkddm.....wwww.....mddkk.",
+    "...ddmmmm..wwww..mmmmdd...",
+    "......mmmwwwwwwwwmmm......",
+    ".........wwwwwwww.........",
+    "...........www............",
+    "..........oww.............",
+    "..........o...............",
+    "..........................",
   ]
   const LEVEL = [
-    "........................",
-    "........................",
-    "........................",
-    "..................kk....",
-    "...............kkddk....",
-    "...kk.......kkddmmk.....",
-    "....k....kkddmmwwk......",
-    ".okwkwwkddmmwwk.........",
-    ".owwwwwwwwwwmmk..........",
-    "..kwwwwwwwwwmmk..........",
-    "..kwwwwwwwkk.............",
-    "...kkkkkkkk.............",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
+    "..........................",
+    "..........................",
+    "..........................",
+    ".kk....................kk.",
+    ".kkdd.......ww.......ddkk.",
+    "...ddmm....wwww....mmdd...",
+    ".....mmmm..wwww..mmmm.....",
+    ".......mmwwwwwwwwmm.......",
+    ".........wwwwwwww.........",
+    "...........www............",
+    "..........oww.............",
+    "..........o...............",
+    "..........................",
   ]
   const UP = [
-    "...............kk.......",
-    ".............kkddk......",
-    "............kddmk.......",
-    "...........kddmk........",
-    "..........kddmk.........",
-    ".........kddmk..........",
-    "...kk...kddmk...........",
-    ".okwkwwkddwk............",
-    ".owwwwwwwwwmmk..........",
-    "..kwwwwwwwwwmmk..........",
-    "..kwwwwwwwkk.............",
-    "...kkkkkkkk.............",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
-    "........................",
+    "..........................",
+    "..........................",
+    ".k......................k.",
+    ".kkd..................dkk.",
+    "..kddm......ww......mddk..",
+    "....dmmm...wwww...mmmd....",
+    "......mmmw.wwww.wmmm......",
+    "........mwwwwwwwwm........",
+    "..........wwwwww..........",
+    "...........www............",
+    "..........oww.............",
+    "..........o...............",
+    "..........................",
   ]
   const palette: Record<string, string> = {
     k: "#23232f",
@@ -318,8 +302,8 @@ export function createSky(): SkyState {
         alt: 17,
         vx: -10,
         vy: 5,
-        flap: 0.68,
-        scale: 0.95,
+        flap: 2.0,
+        scale: GULL_SCALE,
         seed: 2,
         phase: 0.4,
         turn: 0.78,
@@ -419,10 +403,9 @@ export function drawSkyTops(
     if (entity.kind !== "gull") continue
     const frame = gullFrame(entity, s.t) % sprites.gulls.length
     const sprite = sprites.gulls[frame]
-    const altT = clamp01(
-      (entity.alt - GULL_MIN_ALT) / (FLOCK_MAX_ALT - GULL_MIN_ALT)
-    )
-    const scale = entity.scale * (0.7 + altT * 0.16)
+    // Uniform sprite size: altitude still drives parallax + shadow, but every
+    // gull is drawn the same small scale (no big/small variation).
+    const scale = entity.scale
     const w = sprite.width * scale
     const h = sprite.height * scale
     ctx.drawImage(
