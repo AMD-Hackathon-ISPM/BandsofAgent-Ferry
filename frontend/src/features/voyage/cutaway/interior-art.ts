@@ -29,7 +29,6 @@ const SKY = "#0d1834"
 const SKY_HI = "#14254c"
 const STAR = "#c6d0e6"
 const STAR_DIM = "#5a6b94"
-const BIRD = "142, 156, 189" // gull silhouettes outside the glass
 const GLOW = "232, 163, 61" // warm lamp light (#e8a33d), rgb for alpha fills
 const MOON = "140, 180, 255" // cool window light
 const BLOOM_SCREEN = "116, 224, 176" // soft bloom behind lit screens
@@ -1195,7 +1194,6 @@ type AnchorKind =
   | "lamp"
   | "radar"
   | "gauges"
-  | "birds"
 
 interface AnimAnchor {
   kind: AnchorKind
@@ -1292,34 +1290,6 @@ function buildAnchors(zoom: number): AnimAnchor[] {
       })
     }
 
-    // Birds fly past each window run (the sky outside the glass).
-    const band = windowBand(room)
-    if (band) {
-      const zHi = Math.min(band.z1, room.z1)
-      const zLo = Math.max(band.z0, room.z0 + floorH)
-      if (zHi >= zLo) {
-        let runStart = -1
-        for (let x = room.x0; x <= room.x1 + 1; x++) {
-          const occ =
-            x < p.lx && x <= room.x1 && p.occupancy[zHi * p.lx + x] === 1
-          const glass = occ && band.glassAt(x)
-          if (glass && runStart < 0) runStart = x
-          if (!glass && runStart >= 0) {
-            const runEnd = x - 1
-            seed++
-            anchors.push({
-              kind: "birds",
-              x: cellX(runEnd),
-              y: cellY(zHi),
-              w: (runEnd - runStart + 1) * zoom,
-              h: (zHi - zLo + 1) * zoom,
-              seed,
-            })
-            runStart = -1
-          }
-        }
-      }
-    }
   }
   return anchors
 }
@@ -1424,28 +1394,6 @@ export function drawInteriorAnimations(
           const wob = Math.round(Math.sin(t * 2.1 + k * 1.9 + a.seed) * u)
           ctx.fillStyle = `rgba(10, 15, 31, ${0.8 * alpha})`
           ctx.fillRect(dx + wob, dialY, 1, 2 * u)
-        }
-        break
-      }
-      case "birds": {
-        // Gulls drifting across the glass, wings flapping between a "v"
-        // and a level glide. Wide panes get a second, slower bird.
-        const count = a.w > 5 * zoom ? 2 : 1
-        for (let k = 0; k < count; k++) {
-          const speed = 0.06 + 0.03 * ((a.seed + k) % 3)
-          const ph = (t * speed + a.seed * 0.43 + k * 0.5) % 1
-          const bx = x + Math.floor(ph * a.w)
-          const by =
-            y +
-            Math.floor(
-              a.h * (0.3 + 0.18 * Math.sin(t * 0.8 + a.seed * 1.3 + k * 2))
-            )
-          const s = Math.max(1, Math.floor(zoom / 6))
-          const flap = Math.floor(t * 4 + a.seed + k) % 2 === 0
-          ctx.fillStyle = `rgba(${BIRD}, ${0.85 * alpha})`
-          ctx.fillRect(bx, by, s, s)
-          ctx.fillRect(bx - s, by - (flap ? s : 0), s, s)
-          ctx.fillRect(bx + s, by - (flap ? s : 0), s, s)
         }
         break
       }
