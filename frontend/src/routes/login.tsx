@@ -3,6 +3,7 @@ import { IconBrandGithub, IconLock } from "@tabler/icons-react"
 
 import { AGENT_ORDER } from "@/lib/domain"
 import { getRun } from "@/lib/mock/data"
+import { useDocumentTitle } from "@/lib/hooks"
 import { phaseStates } from "@/lib/pipeline"
 import { PHASES } from "@/lib/domain"
 import { useAuth } from "@/providers/auth-provider"
@@ -81,6 +82,7 @@ function LoginPreview() {
 export function Login() {
   const { user, status, beginGitHub } = useAuth()
   const location = useLocation()
+  useDocumentTitle("Ferry · Sign In")
   const from = (location.state as { from?: string } | null)?.from ?? "/"
 
   if (user) return <Navigate to={from} replace />

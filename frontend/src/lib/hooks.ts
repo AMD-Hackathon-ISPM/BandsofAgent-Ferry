@@ -26,6 +26,12 @@ export function usePrefersReducedMotion(): boolean {
   return useMediaQuery("(prefers-reduced-motion: reduce)")
 }
 
+export function useDocumentTitle(title: string): void {
+  React.useEffect(() => {
+    document.title = title
+  }, [title])
+}
+
 export function useNow(intervalMs = 1000): number {
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {

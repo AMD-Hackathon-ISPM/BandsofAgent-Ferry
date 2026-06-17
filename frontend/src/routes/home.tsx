@@ -9,7 +9,7 @@ export function Home() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">Migrations</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          Signed in as @{user?.handle}. Start a run, or open one already in flight.
+          Signed in as @{user?.handle}. Start a run, or return to a voyage already underway.
         </p>
       </div>
 

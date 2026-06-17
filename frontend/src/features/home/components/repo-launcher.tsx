@@ -314,11 +314,11 @@ export function RepoLauncher({ className }: { className?: string }) {
               {repoMenuOpen && (
                 <div
                   role="listbox"
-                  aria-label="GitHub repositories"
-                  className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto border border-border bg-popover py-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                  aria-label="Your GitHub Repositories"
+                  className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto border border-border bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
                 >
                   <div className="px-2 py-1.5 text-[10px] font-medium tracking-wide text-muted-foreground">
-                    GitHub repositories
+                    Your GitHub Repositories
                   </div>
                   {suggestionsLoading ? (
                     <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">

@@ -4,6 +4,7 @@ import { IconAlertTriangle } from "@tabler/icons-react"
 
 import type { Role } from "@/lib/domain"
 import type { User } from "@/lib/types"
+import { useDocumentTitle } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
 import { Logo } from "@/components/brand"
 import { Button } from "@/components/ui/button"
@@ -14,6 +15,7 @@ export function AuthCallback() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [error, setError] = React.useState<string | null>(null)
+  useDocumentTitle("Ferry · Sign In")
 
   React.useEffect(() => {
     const errorParam = params.get("error")

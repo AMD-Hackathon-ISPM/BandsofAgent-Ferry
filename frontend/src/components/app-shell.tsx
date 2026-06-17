@@ -1,6 +1,7 @@
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom"
 import { IconChevronDown, IconLogout } from "@tabler/icons-react"
 
+import { useDocumentTitle } from "@/lib/hooks"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 import { Logo } from "@/components/brand"
@@ -92,8 +93,6 @@ export function TopBar({ className }: { className?: string }) {
         <Link to="/" className="rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring">
           <Logo />
         </Link>
-        <span className="hidden h-4 w-px bg-border sm:block" />
-        <span className="hidden text-xs text-muted-foreground sm:inline">Migration control</span>
       </div>
       <AccountMenu />
     </header>
@@ -103,6 +102,7 @@ export function TopBar({ className }: { className?: string }) {
 export function AppLayout() {
   const { user } = useAuth()
   const location = useLocation()
+  useDocumentTitle("Ferry · Migrations")
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
