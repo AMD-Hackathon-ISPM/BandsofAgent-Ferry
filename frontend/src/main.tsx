@@ -12,18 +12,24 @@ import Login from "@/routes/login"
 import AuthCallback from "@/routes/auth-callback"
 import RunView from "@/routes/run"
 import NotFound from "@/routes/not-found"
+import RouteError from "@/routes/route-error"
 
 const router = createBrowserRouter([
-  { path: "/login", element: <Login /> },
-  { path: "/auth/callback", element: <AuthCallback /> },
   {
-    element: <AppLayout />,
+    errorElement: <RouteError />,
     children: [
-      { index: true, element: <Home /> },
-      { path: "runs/:runId", element: <RunView /> },
+      { path: "/login", element: <Login /> },
+      { path: "/auth/callback", element: <AuthCallback /> },
+      {
+        element: <AppLayout />,
+        children: [
+          { index: true, element: <Home /> },
+          { path: "runs/:runId", element: <RunView /> },
+        ],
+      },
+      { path: "*", element: <NotFound /> },
     ],
   },
-  { path: "*", element: <NotFound /> },
 ])
 
 createRoot(document.getElementById("root")!).render(

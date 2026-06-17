@@ -276,8 +276,6 @@ function RunReady({
           role={role}
           now={now}
           dbApproved={dbApproved}
-          selectedPhase={selectedPhase}
-          onSelectPhase={setSelectedPhase}
         />
 
         <RunBanner run={liveRun} onAction={handleAction} />
@@ -340,9 +338,6 @@ function RunReady({
             >
               Band room
             </CenterToggle>
-            <span className="max-w-48 truncate px-1 text-[11px] text-muted-foreground">
-              {run.bandRoomName}
-            </span>
           </div>
 
           {centerView === "feed" && (
@@ -501,7 +496,7 @@ function FolderPanel({
   return (
     <div
       className={cn(
-        "absolute inset-y-3 z-10 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]",
+        "absolute inset-y-3 z-10 transition-transform duration-500 ease-out",
         isLeft ? "left-3" : "right-3",
         !open &&
           (isLeft
@@ -542,7 +537,7 @@ function FolderPanel({
         />
         <Chevron
           className={cn(
-            "size-3.5 transition-transform duration-500",
+            "size-3.5 transition-transform duration-500 ease-out",
             !open && "rotate-180"
           )}
         />
@@ -558,7 +553,7 @@ function FolderPanel({
       <div
         aria-hidden={!open}
         className={cn(
-          "flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md transition-opacity duration-500",
+          "flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md transition-opacity duration-500 ease-out",
           !open && "pointer-events-none opacity-60"
         )}
       >
