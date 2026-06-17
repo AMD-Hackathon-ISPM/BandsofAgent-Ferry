@@ -292,7 +292,7 @@ function RunReady({
             open={leftOpen}
             onOpenChange={setLeftOpen}
             className={cn(
-              "w-72 transition-[opacity,transform] duration-700",
+              "w-72",
               loading &&
                 "pointer-events-none -translate-x-[calc(100%+0.75rem)] opacity-0"
             )}
@@ -310,7 +310,7 @@ function RunReady({
             open={rightOpen}
             onOpenChange={setRightOpen}
             className={cn(
-              "w-80 transition-[opacity,transform] duration-700",
+              "w-80",
               loading &&
                 "pointer-events-none translate-x-[calc(100%+0.75rem)] opacity-0"
             )}
@@ -496,7 +496,7 @@ function FolderPanel({
   return (
     <div
       className={cn(
-        "absolute inset-y-3 z-10 transition-transform duration-500 ease-out",
+        "absolute inset-y-3 z-10 transition-[translate,opacity] duration-800 ease-in-out will-change-transform",
         isLeft ? "left-3" : "right-3",
         !open &&
           (isLeft
@@ -537,7 +537,7 @@ function FolderPanel({
         />
         <Chevron
           className={cn(
-            "size-3.5 transition-transform duration-500 ease-out",
+            "size-3.5 transition-transform duration-800 ease-in-out",
             !open && "rotate-180"
           )}
         />
@@ -553,8 +553,8 @@ function FolderPanel({
       <div
         aria-hidden={!open}
         className={cn(
-          "flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md transition-opacity duration-500 ease-out",
-          !open && "pointer-events-none opacity-60"
+          "flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-md",
+          !open && "pointer-events-none"
         )}
       >
         {children}
