@@ -26,6 +26,7 @@ type Worker struct {
 	role        agentRole
 	client      *band.AgentClient
 	llm         *LLM
+	llmByTarget map[string]*LLM
 	source      *SourceProvider
 	execEnabled bool
 	runnerURL   string
@@ -39,12 +40,13 @@ type Worker struct {
 	handled map[string]bool
 }
 
-func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
+func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, llmByTarget map[string]*LLM, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
 	return &Worker{
 		info:        info,
 		role:        role,
 		client:      client,
 		llm:         llm,
+		llmByTarget: llmByTarget,
 		source:      source,
 		execEnabled: execEnabled,
 		runnerURL:   runnerURL,
@@ -144,14 +146,14 @@ func (w *Worker) Run(ctx context.Context) error {
 				log.Printf("[%s] rejoin chat_room %s failed: %v", w.info.Key, chatID, err)
 				continue
 			}
-			go w.drain(connCtx, chatID)
+			go w.drain(ctx, connCtx, chatID)
 		}
 
 		var dispatchWG sync.WaitGroup
 		dispatchWG.Add(1)
 		go func() {
 			defer dispatchWG.Done()
-			w.dispatch(connCtx, px)
+			w.dispatch(ctx, connCtx, px)
 		}()
 
 		err := px.Run(connCtx)
@@ -168,10 +170,14 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
+// dispatch reads WebSocket events. connCtx governs the read loop (it ends when
+// the socket drops), but message handling runs under rootCtx so an in-flight
+// LLM call + handoff survives a reconnect — handoffs are HTTP, not WS, so they
+// must not be cancelled just because the socket blipped.
+func (w *Worker) dispatch(rootCtx, connCtx context.Context, px *PhoenixClient) {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-connCtx.Done():
 			return
 		case ev := <-px.Events():
 			switch ev.Event {
@@ -181,13 +187,13 @@ func (w *Worker) dispatch(ctx context.Context, px *PhoenixClient) {
 				if err := json.Unmarshal(ev.Payload, &msg); err != nil {
 					continue
 				}
-				w.handle(ctx, roomID, &msg)
+				w.handle(rootCtx, roomID, &msg)
 			case "room_added":
 				if id := extractRoomID(ev.Payload); id != "" && w.markJoined(id) {
 					if err := px.Join("chat_room:" + id); err != nil {
 						log.Printf("[%s] join chat_room %s failed: %v", w.info.Key, id, err)
 					} else {
-						go w.drain(ctx, id)
+						go w.drain(rootCtx, connCtx, id)
 					}
 				}
 			}
@@ -232,13 +238,16 @@ func reconnectDelay(attempt int) time.Duration {
 	return delay
 }
 
-func (w *Worker) drain(ctx context.Context, chatID string) {
+// drain polls a chat's pending inbox. The poll loop is bound to connCtx (stops
+// when the socket drops; it re-drains on reconnect), but each message is handled
+// under rootCtx so a long generation isn't aborted by a reconnect.
+func (w *Worker) drain(rootCtx, connCtx context.Context, chatID string) {
 	attempted := make(map[string]bool)
 	for {
-		if ctx.Err() != nil {
+		if connCtx.Err() != nil {
 			return
 		}
-		msg, ok, err := w.client.NextMessage(ctx, chatID)
+		msg, ok, err := w.client.NextMessage(connCtx, chatID)
 		if err != nil {
 			log.Printf("[%s] next message (%s): %v", w.info.Key, chatID, err)
 			return
@@ -250,7 +259,7 @@ func (w *Worker) drain(ctx context.Context, chatID string) {
 			return
 		}
 		attempted[msg.ID] = true
-		w.handle(ctx, chatID, msg)
+		w.handle(rootCtx, chatID, msg)
 	}
 }
 
@@ -294,7 +303,8 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 
 	prompt := w.buildPrompt(ctx, msg, runCtx, execReport)
 
-	output, err := w.llm.Complete(ctx, w.role.system, prompt)
+	llm := w.selectLLM(runCtx.Tgt)
+	output, err := llm.Complete(ctx, w.role.system, prompt)
 	if err != nil {
 		log.Printf("[%s] llm failed: %v", w.info.Key, err)
 		_ = w.client.MarkFailed(ctx, chatID, msg.ID, err.Error())
@@ -305,6 +315,9 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	if w.role.producesFiles {
 		if files := extractFiles(output); len(files) > 0 {
 			w.storeFiles(ctx, runCtx.Run, files)
+			log.Printf("[%s] stored %d generated file(s) for run %s", w.info.Key, len(files), runCtx.Run)
+		} else {
+			log.Printf("[%s] no generated files extracted from model output for run %s", w.info.Key, runCtx.Run)
 		}
 	}
 
@@ -315,7 +328,7 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		}
 	}
 
-	nextKey, note := w.resolveNext(output, &runCtx)
+	nextKey, note := w.resolveNext(output, &runCtx, msg.Content)
 	if next, ok := w.roster[nextKey]; ok && nextKey != "" {
 		content := output
 		if artifact != "" {
@@ -347,13 +360,11 @@ const maxReworks = 2
 // static `next`, but the Commander branches on its verdict: NEEDS_REWORK loops
 // back to the Code Generator (until the rework budget is spent) while APPROVED
 // proceeds to the GitHub Connector.
-func (w *Worker) resolveNext(output string, rc *band.RunCtx) (string, string) {
+func (w *Worker) resolveNext(output string, rc *band.RunCtx, incoming string) (string, string) {
 	if w.info.Key == "commander" && !commanderApproved(output) {
 		if rc.Rework < maxReworks {
 			rc.Rework++
-			return "code_generator", fmt.Sprintf(
-				"the migration needs rework (attempt %d of %d). Address the issues raised in the review above and regenerate the full set of files, then continue down the band.",
-				rc.Rework, maxReworks)
+			return "code_generator", w.reworkNote(rc.Rework, maxReworks, incoming)
 		}
 		log.Printf("[%s] rework budget (%d) exhausted; proceeding to %s", w.info.Key, maxReworks, w.role.next)
 	}
@@ -411,4 +422,91 @@ func extractRoomID(payload json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+func (w *Worker) selectLLM(target string) *LLM {
+	if llm, ok := w.llmByTarget[strings.ToLower(target)]; ok && llm != nil {
+		return llm
+	}
+	return w.llm
+}
+
+func (w *Worker) reworkNote(attempt, max int, incoming string) string {
+	summary := summarizeReworkIssues(incoming)
+	if summary == "" {
+		return fmt.Sprintf(
+			"the migration needs rework (attempt %d of %d). Regenerate the full file set and fix the blocking issues from the review before continuing down the band.",
+			attempt, max,
+		)
+	}
+	return fmt.Sprintf(
+		"the migration needs rework (attempt %d of %d). Regenerate the full file set and fix these blocking issues before continuing:\n%s",
+		attempt, max, summary,
+	)
+}
+
+func summarizeReworkIssues(incoming string) string {
+	arts, cleaned := band.ParseArtifacts(incoming)
+	candidates := make([]string, 0, 16)
+	candidates = append(candidates, extractIssueLines(cleaned)...)
+	for _, art := range arts {
+		if art.Kind == "build" || art.Kind == "test" {
+			candidates = append(candidates, extractIssueLines(art.Body)...)
+		}
+	}
+
+	seen := map[string]bool{}
+	lines := make([]string, 0, 5)
+	for _, c := range candidates {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		lines = append(lines, "- "+c)
+		if len(lines) == 5 {
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func extractIssueLines(s string) []string {
+	raw := strings.Split(normalizeNewlines(s), "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "- ")
+		if line == "" {
+			continue
+		}
+		if isActionableIssueLine(line) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func isActionableIssueLine(line string) bool {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.HasPrefix(lower, "blockers:"):
+		return false
+	case strings.Contains(lower, "no required module provides package"):
+		return true
+	case strings.Contains(lower, "no matching files found"):
+		return true
+	case strings.Contains(lower, "undefined:"):
+		return true
+	case strings.Contains(lower, "missing"):
+		return true
+	case strings.Contains(lower, "cannot"):
+		return true
+	case strings.Contains(lower, "failed"):
+		return true
+	case strings.Contains(line, ".go:") || strings.Contains(line, ".rs:") || strings.Contains(line, ".sql:"):
+		return true
+	default:
+		return false
+	}
 }

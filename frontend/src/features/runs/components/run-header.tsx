@@ -15,7 +15,7 @@ import {
 } from "@tabler/icons-react"
 
 import { canCancel as canCancelRole, isLive } from "@/lib/domain"
-import type { PhaseKey, Role } from "@/lib/domain"
+import type { Role } from "@/lib/domain"
 import { clock, elapsed, shortSha } from "@/lib/format"
 import type { Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -23,7 +23,6 @@ import { startRun, cancelRun, rerunRun } from "@/lib/api"
 import { useAuth } from "@/providers/auth-provider"
 import { LangRoute } from "@/features/migrations/components/lang-route"
 import { StatusBadge } from "@/features/migrations/components/status-badge"
-import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
 import { Button } from "@/components/ui/button"
 
 const ACTION_BUTTON_CLASS = "h-8 min-w-28 justify-center px-3 text-sm"
@@ -284,16 +283,12 @@ export function RunHeader({
   run,
   role,
   now,
-  selectedPhase,
-  onSelectPhase,
   className,
 }: {
   run: Run
   role: Role
   now: number
   dbApproved?: boolean
-  selectedPhase?: PhaseKey | null
-  onSelectPhase?: (phase: PhaseKey | null) => void
   className?: string
 }) {
   const live = isLive(run.status)
@@ -351,12 +346,6 @@ export function RunHeader({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          <PhasePipeline
-            run={run}
-            selected={selectedPhase}
-            onSelect={onSelectPhase}
-            density="compact"
-          />
           <RunActionButton run={run} role={role} />
         </div>
       </div>

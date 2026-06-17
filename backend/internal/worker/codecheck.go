@@ -12,40 +12,128 @@ import (
 	"github.com/ferry/backend/internal/sandbox"
 )
 
-var fencedBlock = regexp.MustCompile("(?s)```[^\n]*\n(.*?)```")
+var fencedBlock = regexp.MustCompile("(?s)```([^\n]*)\n(.*?)```")
 
-var fileMarker = regexp.MustCompile(`^\s*(?://|#)\s*file:\s*(\S+)\s*$`)
+var fileMarker = regexp.MustCompile(`(?i)^\s*(?://|#|--|/\*)?\s*file\s*:\s*([^\s*]+)\s*(?:\*/)?\s*$`)
+var barePathLine = regexp.MustCompile(`^(?:\./)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$`)
+var exitMarker = regexp.MustCompile(`(?m)^---exit:(\d+)\s*$`)
 
 func extractFiles(content string) map[string]string {
 	files := make(map[string]string)
-	for _, m := range fencedBlock.FindAllStringSubmatch(content, -1) {
-		body := m[1]
-		lines := strings.SplitN(body, "\n", 2)
-		if len(lines) < 2 {
+	matches := fencedBlock.FindAllStringSubmatchIndex(content, -1)
+	for i, idx := range matches {
+		info := strings.TrimSpace(content[idx[2]:idx[3]])
+		body := normalizeNewlines(content[idx[4]:idx[5]])
+
+		path, code, ok := extractFileFromFence(content, matches, i, info, body)
+		if !ok {
 			continue
 		}
-		mk := fileMarker.FindStringSubmatch(lines[0])
-		if mk == nil {
-			continue
-		}
-		path := strings.TrimPrefix(mk[1], "./")
-		if path == "" || strings.Contains(path, "..") {
-			continue
-		}
-		files[path] = strings.TrimRight(lines[1], "\n") + "\n"
+		files[path] = code
 	}
 	return files
 }
 
+func extractFileFromFence(content string, matches [][]int, i int, info, body string) (path, code string, ok bool) {
+	lines := strings.Split(body, "\n")
+	for n := 0; n < len(lines) && n < 5; n++ {
+		if mk := fileMarker.FindStringSubmatch(strings.TrimSpace(lines[n])); mk != nil {
+			path, ok = sanitizeFilePath(mk[1])
+			if !ok {
+				return "", "", false
+			}
+			code = strings.Join(lines[n+1:], "\n")
+			code = strings.TrimLeft(code, "\n")
+			return path, ensureTrailingNewline(code), true
+		}
+	}
+
+	prevText := ""
+	if i > 0 {
+		prevText = content[matches[i-1][1]:matches[i][0]]
+	} else {
+		prevText = content[:matches[i][0]]
+	}
+	for _, line := range trailingNonEmptyLines(normalizeNewlines(prevText), 3) {
+		if mk := fileMarker.FindStringSubmatch(line); mk != nil {
+			path, ok = sanitizeFilePath(mk[1])
+			if !ok {
+				return "", "", false
+			}
+			return path, ensureTrailingNewline(body), true
+		}
+		if infoPath, ok := sanitizeFilePath(line); ok {
+			return infoPath, ensureTrailingNewline(body), true
+		}
+	}
+
+	if infoPath, ok := sanitizeFilePath(info); ok {
+		return infoPath, ensureTrailingNewline(body), true
+	}
+	if mk := fileMarker.FindStringSubmatch(info); mk != nil {
+		path, ok = sanitizeFilePath(mk[1])
+		if ok {
+			return path, ensureTrailingNewline(body), true
+		}
+	}
+
+	return "", "", false
+}
+
+func trailingNonEmptyLines(s string, limit int) []string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, limit)
+	for i := len(lines) - 1; i >= 0 && len(out) < limit; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		out = append([]string{line}, out...)
+	}
+	return out
+}
+
+func sanitizeFilePath(raw string) (string, bool) {
+	path := strings.TrimSpace(raw)
+	path = strings.Trim(path, "`*_")
+	path = strings.TrimPrefix(path, "./")
+	path = strings.TrimSuffix(path, ":")
+	if path == "" || strings.Contains(path, "..") || strings.ContainsAny(path, `\`) {
+		return "", false
+	}
+	if !strings.Contains(path, "/") && !strings.Contains(path, ".") {
+		return "", false
+	}
+	if !barePathLine.MatchString(path) {
+		return "", false
+	}
+	return path, true
+}
+
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
+func ensureTrailingNewline(s string) string {
+	return strings.TrimRight(s, "\n") + "\n"
+}
+
 type codeCheckResult struct {
-	kind   string
-	status string
-	output string
-	files  int
+	kind    string
+	status  string
+	output  string
+	files   int
+	summary string
 }
 
 func (r *codeCheckResult) promptText() string {
-	return fmt.Sprintf("SANDBOX %s RESULT (%d files, %s):\n%s", strings.ToUpper(r.kind), r.files, r.status, r.output)
+	var b strings.Builder
+	fmt.Fprintf(&b, "SANDBOX %s RESULT (%d files, %s)", strings.ToUpper(r.kind), r.files, r.status)
+	if r.summary != "" {
+		fmt.Fprintf(&b, "\nKEY DIAGNOSTICS:\n%s", r.summary)
+	}
+	fmt.Fprintf(&b, "\nRAW OUTPUT:\n%s", r.output)
+	return b.String()
 }
 
 func (r *codeCheckResult) artifactBlock() string {
@@ -69,6 +157,7 @@ func (w *Worker) runCodeChecks(ctx context.Context, runID, targetLang, mode stri
 		log.Printf("[%s] code-check: sandbox: %v", w.info.Key, err)
 		return nil
 	}
+	res = normalizeSandboxResult(res)
 
 	status := fmt.Sprintf("exit %d", res.ExitCode)
 	switch {
@@ -81,7 +170,13 @@ func (w *Worker) runCodeChecks(ctx context.Context, runID, targetLang, mode stri
 	case mode == "test":
 		status = "FAIL"
 	}
-	return &codeCheckResult{kind: mode, status: status, output: res.Output, files: len(files)}
+	return &codeCheckResult{
+		kind:    mode,
+		status:  status,
+		output:  res.Output,
+		files:   len(files),
+		summary: summarizeSandboxOutput(res.Output),
+	}
 }
 
 func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bool) {
@@ -99,7 +194,7 @@ func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bo
 		// dirs under /root are unwritable. Point HOME and the Go caches at the
 		// /tmp tmpfs (rw) so the build cache can initialize.
 		env := "export HOME=/tmp GOCACHE=/tmp/.cache/go-build GOPATH=/tmp/go GOMODCACHE=/tmp/go/pkg/mod GOTMPDIR=/tmp; "
-		script := fmt.Sprintf("%s%s%s 2>&1; echo \"---exit:$?\"", env, prefix, cmd)
+		script := fmt.Sprintf("%s%s%s 2>&1; rc=$?; echo \"---exit:$rc\"; exit $rc", env, prefix, cmd)
 		return sandbox.Spec{Image: "golang:1.25-alpine", Files: files, Script: script, Timeout: 180 * time.Second}, true
 	case "rust":
 		// Same read-only rootfs constraint: cargo writes to $CARGO_HOME (default
@@ -109,13 +204,74 @@ func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bo
 		if mode == "test" {
 			cmd = "cargo test"
 		}
-		script := fmt.Sprintf("%s%s 2>&1; echo \"---exit:$?\"", env, cmd)
+		script := fmt.Sprintf("%s%s 2>&1; rc=$?; echo \"---exit:$rc\"; exit $rc", env, cmd)
 		if !hasFile(files, "Cargo.toml") {
-			script = env + `for f in $(find . -name '*.rs'); do rustc --edition 2021 "$f" -o /tmp/out 2>&1; done; echo "---exit:$?"`
+			script = env + `rc=0; for f in $(find . -name '*.rs'); do rustc --edition 2021 "$f" -o /tmp/out 2>&1 || rc=$?; done; echo "---exit:$rc"; exit $rc`
 		}
 		return sandbox.Spec{Image: "rust:1-alpine", Files: files, Script: script, Timeout: 240 * time.Second}, true
 	default:
 		return sandbox.Spec{}, false
+	}
+}
+
+func normalizeSandboxResult(res sandbox.Result) sandbox.Result {
+	matches := exitMarker.FindStringSubmatch(res.Output)
+	if len(matches) == 2 {
+		if code := matches[1]; code != "" {
+			var parsed int
+			fmt.Sscanf(code, "%d", &parsed)
+			res.ExitCode = parsed
+		}
+		res.Output = strings.TrimSpace(exitMarker.ReplaceAllString(res.Output, ""))
+	}
+	return res
+}
+
+func summarizeSandboxOutput(output string) string {
+	lines := strings.Split(normalizeNewlines(output), "\n")
+	seen := map[string]bool{}
+	selected := make([]string, 0, 6)
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" || line == "FAIL" || strings.HasPrefix(line, "---exit:") {
+			continue
+		}
+		if !relevantSandboxLine(line) {
+			continue
+		}
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+		selected = append(selected, "- "+line)
+		if len(selected) == 6 {
+			break
+		}
+	}
+	return strings.Join(selected, "\n")
+}
+
+func relevantSandboxLine(line string) bool {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.Contains(line, ":") && (strings.Contains(lower, "error") || strings.Contains(lower, "fail")):
+		return true
+	case strings.Contains(lower, "no required module provides package"):
+		return true
+	case strings.Contains(lower, "pattern ") && strings.Contains(lower, "no matching files found"):
+		return true
+	case strings.Contains(lower, "undefined:"):
+		return true
+	case strings.Contains(lower, "cannot find"):
+		return true
+	case strings.Contains(lower, "panic:"):
+		return true
+	case strings.Contains(lower, "exit status"):
+		return true
+	case strings.Contains(line, ".go:") || strings.Contains(line, ".rs:") || strings.Contains(line, ".sql:"):
+		return true
+	default:
+		return false
 	}
 }
 

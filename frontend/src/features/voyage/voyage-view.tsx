@@ -3,14 +3,9 @@ import { useSearchParams } from "react-router-dom"
 import { IconExternalLink, IconX } from "@tabler/icons-react"
 
 import type { AgentKey } from "@/lib/domain"
-import { AGENTS, AGENT_ORDER, PHASES, STATUS } from "@/lib/domain"
 import type { AgentMessageVM, Run } from "@/lib/types"
-import {
-  currentPhaseIndex,
-  phaseStates,
-  type PhaseNodeState,
-} from "@/lib/pipeline"
 import { cn } from "@/lib/utils"
+import { PhasePipeline } from "@/features/runs/components/phase-pipeline"
 import { deriveVoyage, type VoyageStatus } from "./progress"
 import { useVoyageScene } from "./use-voyage-scene"
 import { ShipLog } from "./ship-log"
@@ -131,7 +126,7 @@ export function VoyageView(props: {
         <ArrivalPopup run={run} pr={run.pr} />
       )}
       {!intro && (
-        <VoyageProgress run={run} voyage={voyage} className={progressClassName} />
+        <VoyageProgress run={run} className={progressClassName} />
       )}
     </section>
   )
@@ -195,48 +190,13 @@ function ArrivalPopup({
   )
 }
 
-const SEGMENT_COLOR: Record<PhaseNodeState, string> = {
-  done: "var(--primary)",
-  active: "var(--signal)",
-  blocked: "var(--warning)",
-  failed: "var(--destructive)",
-  upcoming: "var(--border)",
-  skipped: "var(--border)",
-}
-
-function voyageLabel(run: Run, voyage: VoyageStatus): string {
-  if (voyage.mode === "blocked" && run.status === "needs_rework") {
-    const agent = AGENTS[AGENT_ORDER[voyage.stop]]
-    return `Returning - ${agent.name.toLowerCase()} refine`
-  }
-  switch (voyage.mode) {
-    case "pending":
-      return "At anchor — awaiting departure"
-    case "arrived":
-      return "Docked — migration shipped"
-    case "failed":
-      return "Adrift — run failed"
-    case "blocked":
-      return `Heaved to — ${STATUS[run.status].label.toLowerCase()}`
-    case "sailing": {
-      const idx = currentPhaseIndex(run)
-      const phase = PHASES[Math.min(Math.max(idx, 0), PHASES.length - 1)]
-      return `En route — ${phase.label.toLowerCase()}`
-    }
-  }
-}
-
 function VoyageProgress({
   run,
-  voyage,
   className,
 }: {
   run: Run
-  voyage: VoyageStatus
   className?: string
 }) {
-  const states = phaseStates(run)
-
   return (
     <div
       className={cn(
@@ -244,24 +204,8 @@ function VoyageProgress({
         className
       )}
     >
-      <div className="flex flex-col items-center gap-1.5 rounded-md border border-border bg-card/85 px-3 py-2 shadow-lg backdrop-blur-sm">
-        <div className="flex items-center gap-1" aria-hidden="true">
-          {states.map((state, i) => (
-            <span
-              key={PHASES[i].key}
-              title={PHASES[i].label}
-              className={cn(
-                "h-1 w-6 rounded-full",
-                state === "active" && "dot-pulse",
-                state === "skipped" && "opacity-40"
-              )}
-              style={{ backgroundColor: SEGMENT_COLOR[state] }}
-            />
-          ))}
-        </div>
-        <p className="font-mono text-[10px] tracking-wide text-muted-foreground">
-          {voyageLabel(run, voyage)}
-        </p>
+      <div className="rounded-md border border-border bg-card/85 px-3 py-2 shadow-lg backdrop-blur-sm">
+        <PhasePipeline run={run} density="compact" />
       </div>
     </div>
   )

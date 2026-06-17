@@ -310,6 +310,61 @@
   }
 }
 
+/* Syntax-highlighted code surface (Shiki dual-theme output). The app is dark by
+   default; `--shiki-light` applies in light mode, `--shiki-dark` under `.dark`. */
+@layer components {
+  .code-surface .shiki {
+    margin: 0;
+    padding: 0.75rem 0;
+    background: transparent !important;
+    font-size: 12.5px;
+    line-height: 1.6;
+    tab-size: 2;
+    overflow-x: auto;
+  }
+  .code-surface .shiki,
+  .code-surface .shiki span {
+    color: var(--shiki-light);
+  }
+  .dark .code-surface .shiki,
+  .dark .code-surface .shiki span {
+    color: var(--shiki-dark);
+  }
+  .code-surface .shiki code {
+    display: block;
+    width: fit-content;
+    min-width: 100%;
+    counter-reset: step;
+  }
+  .code-surface .shiki .line::before {
+    content: counter(step);
+    counter-increment: step;
+    display: inline-block;
+    width: 2.5rem;
+    margin-right: 1.25rem;
+    padding-right: 0.5rem;
+    text-align: right;
+    color: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+    border-right: 1px solid var(--border);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  /* Wrap mode: let long lines flow; keep the gutter pinned to the first row. */
+  .code-surface[data-wrap="true"] .shiki {
+    overflow-x: hidden;
+  }
+  .code-surface[data-wrap="true"] .shiki code {
+    width: 100%;
+  }
+  .code-surface[data-wrap="true"] .shiki .line {
+    display: block;
+    white-space: pre-wrap;
+    word-break: break-word;
+    text-indent: -3.75rem;
+    padding-left: 3.75rem;
+  }
+}
+
 @keyframes dot-pulse {
   0%,
   100% {

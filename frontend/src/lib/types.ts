@@ -57,7 +57,10 @@ export interface Artifact {
   fileName: string
   sizeBytes: number
   createdBy: AgentKey
+  /** Short snippet shown before full content loads. */
   preview?: string
+  /** Full file body. Falls back to `preview` until the backend serves it. */
+  content?: string
 }
 
 export interface DbPlan {
