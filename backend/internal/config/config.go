@@ -146,15 +146,17 @@ type AgentsConfig struct {
 
 	MaxConcurrency int
 
-	Router          AgentModelConfig
-	SourceAnalyzer  AgentModelConfig
-	BusinessLogic   AgentModelConfig
-	CodeGenerator   AgentModelConfig
-	DbMigration     AgentModelConfig
-	TestGenerator   AgentModelConfig
-	Reviewer        AgentModelConfig
-	Commander       AgentModelConfig
-	GithubConnector AgentModelConfig
+	Router            AgentModelConfig
+	SourceAnalyzer    AgentModelConfig
+	BusinessLogic     AgentModelConfig
+	CodeGenerator     AgentModelConfig
+	CodeGeneratorGo   AgentModelConfig
+	CodeGeneratorRust AgentModelConfig
+	DbMigration       AgentModelConfig
+	TestGenerator     AgentModelConfig
+	Reviewer          AgentModelConfig
+	Commander         AgentModelConfig
+	GithubConnector   AgentModelConfig
 }
 
 func (ac *AgentsConfig) agentByKey(agentKey string) AgentModelConfig {
@@ -184,6 +186,27 @@ func (ac *AgentsConfig) agentByKey(agentKey string) AgentModelConfig {
 
 func (ac *AgentsConfig) ForAgent(agentKey string) (baseURL, apiKey, model string) {
 	cfg := ac.agentByKey(agentKey)
+	src, ok := ac.Sources[cfg.Source]
+	if !ok {
+		src = ac.Sources["aimlapi"]
+	}
+	return src.BaseURL, src.APIKey, cfg.Model
+}
+
+func (ac *AgentsConfig) ForAgentTarget(agentKey, target string) (baseURL, apiKey, model string) {
+	cfg := ac.agentByKey(agentKey)
+	if agentKey == "code_generator" {
+		switch strings.ToLower(target) {
+		case "go":
+			if ac.CodeGeneratorGo.Model != "" {
+				cfg = ac.CodeGeneratorGo
+			}
+		case "rust":
+			if ac.CodeGeneratorRust.Model != "" {
+				cfg = ac.CodeGeneratorRust
+			}
+		}
+	}
 	src, ok := ac.Sources[cfg.Source]
 	if !ok {
 		src = ac.Sources["aimlapi"]
@@ -320,6 +343,14 @@ func Load() (*Config, error) {
 			CodeGenerator: AgentModelConfig{
 				Model:  getEnv("AGENT_CODE_GENERATOR_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),
 				Source: getEnv("AGENT_CODE_GENERATOR_SOURCE", "featherless"),
+			},
+			CodeGeneratorGo: AgentModelConfig{
+				Model:  getEnv("AGENT_CODE_GENERATOR_GO_MODEL", getEnv("AGENT_CODE_GENERATOR_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled")),
+				Source: getEnv("AGENT_CODE_GENERATOR_GO_SOURCE", getEnv("AGENT_CODE_GENERATOR_SOURCE", "featherless")),
+			},
+			CodeGeneratorRust: AgentModelConfig{
+				Model:  getEnv("AGENT_CODE_GENERATOR_RUST_MODEL", getEnv("AGENT_CODE_GENERATOR_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled")),
+				Source: getEnv("AGENT_CODE_GENERATOR_RUST_SOURCE", getEnv("AGENT_CODE_GENERATOR_SOURCE", "featherless")),
 			},
 			DbMigration: AgentModelConfig{
 				Model:  getEnv("AGENT_DB_MIGRATION_MODEL", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"),

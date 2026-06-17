@@ -74,8 +74,15 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		llmBase, llmKey, llmModel := cfg.Agents.ForAgent(a.Key)
 		client := band.NewAgentClient(baseURL, ident.APIKey)
 		llm := NewLLM(llmBase, llmKey, llmModel, limiter)
+		llmByTarget := map[string]*LLM{}
+		if a.Key == "code_generator" {
+			goBase, goKey, goModel := cfg.Agents.ForAgentTarget(a.Key, "go")
+			rustBase, rustKey, rustModel := cfg.Agents.ForAgentTarget(a.Key, "rust")
+			llmByTarget["go"] = NewLLM(goBase, goKey, goModel, limiter)
+			llmByTarget["rust"] = NewLLM(rustBase, rustKey, rustModel, limiter)
+		}
 
-		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
+		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, llmByTarget, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
 	}
 
 	if len(workers) == 0 {
