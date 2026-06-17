@@ -1,6 +1,12 @@
 import * as React from "react"
 
+import {
+  DUMMY_ACCESS_TOKEN,
+  DUMMY_REFRESH_TOKEN,
+  USE_DUMMY_DATA,
+} from "@/lib/dev-mode"
 import type { Role } from "@/lib/domain"
+import { CURRENT_USER } from "@/lib/mock/data"
 import type { User } from "@/lib/types"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
@@ -37,8 +43,34 @@ function loadSession(): StoredSession | null {
   }
 }
 
+function isValidSession(session: StoredSession | null): session is StoredSession {
+  return Boolean(session?.user?.id && session.accessToken)
+}
+
+function isDummySession(session: StoredSession | null): boolean {
+  return session?.accessToken === DUMMY_ACCESS_TOKEN
+}
+
+function createDummySession(): StoredSession {
+  return {
+    user: CURRENT_USER,
+    accessToken: DUMMY_ACCESS_TOKEN,
+    refreshToken: DUMMY_REFRESH_TOKEN,
+  }
+}
+
+function initialSession(): StoredSession | null {
+  const stored = loadSession()
+  if (isValidSession(stored)) {
+    if (!USE_DUMMY_DATA && isDummySession(stored)) return null
+    return stored
+  }
+  if (USE_DUMMY_DATA) return createDummySession()
+  return null
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = React.useState<StoredSession | null>(loadSession)
+  const [session, setSession] = React.useState<StoredSession | null>(initialSession)
   const [status, setStatus] = React.useState<AuthStatus>(() =>
     session ? "authenticated" : "idle",
   )
@@ -49,9 +81,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const beginGitHub = React.useCallback(() => {
+    if (USE_DUMMY_DATA) {
+      const next = createDummySession()
+      setSession(next)
+      setStatus("authenticated")
+      persist(next)
+      return
+    }
     setStatus("authenticating")
     window.location.href = `${API_URL}/auth/github`
-  }, [])
+  }, [persist])
 
   const completeGitHub = React.useCallback(
     (newSession: StoredSession) => {

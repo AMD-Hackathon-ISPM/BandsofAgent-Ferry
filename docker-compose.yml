@@ -69,6 +69,9 @@ services:
       MINIO_ENDPOINT: minio:9000
       FRONTEND_URL: http://localhost
       GITHUB_REDIRECT_URI: http://localhost/auth/github/callback
+    volumes:
+      # GitHub App private key (read-only) → path referenced by GITHUB_APP_PRIVATE_KEY_PATH
+      - ./backend/ferrylocal.2026-06-16.private-key.pem:/etc/ferry/github-app.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,6 +99,9 @@ services:
     environment:
       REDIS_HOST: redis
       RUNNER_URL: http://runner:9090
+    volumes:
+      # GitHub App private key (read-only) → path referenced by GITHUB_APP_PRIVATE_KEY_PATH
+      - ./backend/ferrylocal.2026-06-16.private-key.pem:/etc/ferry/github-app.pem:ro
     depends_on:
       - backend
       - runner

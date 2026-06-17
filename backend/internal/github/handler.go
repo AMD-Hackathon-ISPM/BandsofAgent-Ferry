@@ -14,10 +14,11 @@ import (
 type Handler struct {
 	rdb         *redis.Client
 	fallbackPAT string
+	app         *App
 }
 
-func NewHandler(rdb *redis.Client, fallbackPAT string) *Handler {
-	return &Handler{rdb: rdb, fallbackPAT: fallbackPAT}
+func NewHandler(rdb *redis.Client, fallbackPAT string, app *App) *Handler {
+	return &Handler{rdb: rdb, fallbackPAT: fallbackPAT, app: app}
 }
 
 func (h *Handler) clientForUser(ctx context.Context, userID string) *Client {
@@ -63,6 +64,35 @@ func (h *Handler) ListSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, suggestions)
+}
+
+// AppInstallation reports whether the Ferry GitHub App is installed on the
+// given repo, and where to install it. The frontend uses this to gate launch:
+// no install → no write access → show an install button. When the App isn't
+// configured at all, report installed=true so the flow isn't blocked (the PR
+// step still falls back to the login token / PAT).
+func (h *Handler) AppInstallation(w http.ResponseWriter, r *http.Request) {
+	repoParam := r.URL.Query().Get("repo")
+	parts := strings.SplitN(repoParam, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		writeError(w, http.StatusBadRequest, "invalid repo format, expected owner/name")
+		return
+	}
+
+	if h.app == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"installed": true, "installUrl": ""})
+		return
+	}
+
+	installed, err := h.app.Installed(r.Context(), parts[0], strings.TrimSuffix(parts[1], ".git"))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to check GitHub App installation")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installed":  installed,
+		"installUrl": h.app.InstallURL(),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -48,15 +48,22 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 	if rt := os.Getenv("SANDBOX_RUNTIME"); rt != "" {
 		args = append(args, "--runtime", rt)
 	}
+	// Network is enabled by default so builds can fetch dependencies (go mod
+	// download, cargo fetch). Set SANDBOX_NETWORK=none to fully isolate (only
+	// stdlib-only code will then compile).
+	network := os.Getenv("SANDBOX_NETWORK")
+	if network == "" {
+		network = "bridge"
+	}
 	args = append(args,
-		"--network", "none",
-		"--memory", "768m",
+		"--network", network,
+		"--memory", "2g",
 		"--cpus", "1.5",
-		"--pids-limit", "256",
+		"--pids-limit", "512",
 		"--security-opt", "no-new-privileges",
 		"--read-only",
-		"--tmpfs", "/work:rw,exec,size=256m",
-		"--tmpfs", "/tmp:rw,exec,size=128m",
+		"--tmpfs", "/work:rw,exec,size=512m",
+		"--tmpfs", "/tmp:rw,exec,size=1g",
 		"-w", "/work",
 		spec.Image,
 		"sh", "-c", script,

@@ -385,12 +385,14 @@ export function OutputsPanel({
   dbApproved,
   onApproveDbPlan,
   className,
+  showHeader = true,
 }: {
   run: Run
   canApprove: boolean
   dbApproved: boolean
   onApproveDbPlan: () => void
   className?: string
+  showHeader?: boolean
 }) {
   const empty = !run.dbPlan && !run.pr && run.artifacts.length === 0
   return (
@@ -398,11 +400,13 @@ export function OutputsPanel({
       className={cn("flex flex-col", className)}
       aria-label="Run outputs"
     >
-      <div className="flex items-center justify-between border-b border-border px-3 py-3">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase">
-          Outputs
-        </h2>
-      </div>
+      {showHeader && (
+        <div className="flex items-center justify-between border-b border-border px-3 py-3">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase">
+            Outputs
+          </h2>
+        </div>
+      )}
       <div className="flex flex-col gap-4 overflow-y-auto p-3">
         {empty ? (
           <p className="px-1 py-8 text-center text-xs text-muted-foreground">

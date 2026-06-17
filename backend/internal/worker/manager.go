@@ -8,6 +8,7 @@ import (
 
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/config"
+	"github.com/ferry/backend/internal/github"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,7 +37,14 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.DB,
 	})
-	source := NewSourceProvider(cfg.GitHub.PAT, rdb)
+
+	ghApp, err := github.NewApp(cfg.GitHub.AppID, cfg.GitHub.AppSlug, cfg.GitHub.AppPrivateKey)
+	if err != nil {
+		log.Printf("github app disabled: %v", err)
+	} else if ghApp != nil {
+		log.Printf("github app enabled (id %s) — PRs use per-repo installation tokens", cfg.GitHub.AppID)
+	}
+	source := NewSourceProvider(cfg.GitHub.PAT, rdb, ghApp)
 
 	keyByID := make(map[string]string)
 	for key, a := range cfg.Band.Agents {

@@ -61,12 +61,14 @@ export function AgentRoster({
   onSelect,
   now,
   className,
+  showHeader = true,
 }: {
   run: Run
   selected?: AgentKey | null
   onSelect?: (agent: AgentKey | null) => void
   now: number
   className?: string
+  showHeader?: boolean
 }) {
   const byKey = new Map(run.agents.map((a) => [a.key, a]))
   const activeCount = run.agents.filter((a) => a.status === "active").length
@@ -76,18 +78,20 @@ export function AgentRoster({
       className={cn("flex flex-col", className)}
       aria-label="Agent roster"
     >
-      <div className="flex items-center justify-between border-b border-border px-3 py-3">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase">
-          The band
-        </h2>
-        <span className="text-[11px] text-muted-foreground">
-          {activeCount > 0 ? (
-            <span className="text-signal">{activeCount} active</span>
-          ) : (
-            <span>{run.agents.length} agents</span>
-          )}
-        </span>
-      </div>
+      {showHeader && (
+        <div className="flex items-center justify-between border-b border-border px-3 py-3">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase">
+            The band
+          </h2>
+          <span className="text-[11px] text-muted-foreground">
+            {activeCount > 0 ? (
+              <span className="text-signal">{activeCount} active</span>
+            ) : (
+              <span>{run.agents.length} agents</span>
+            )}
+          </span>
+        </div>
+      )}
       <div className="flex flex-col">
         {AGENT_ORDER.map((key) => {
           const runtime = byKey.get(key) ?? { key, status: "idle" as const }

@@ -21,6 +21,7 @@ import type { AgentMessageVM, Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { AgentGlyph } from "@/features/migrations/components/agent"
 import { BandChatter } from "@/features/runs/components/band-chatter"
+import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
 import {
   Collapsible,
@@ -52,7 +53,7 @@ function PrimitiveValue({ value }: { value: unknown }) {
 
 function PayloadView({ payload }: { payload: Record<string, unknown> }) {
   const entries = Object.entries(payload).filter(
-    ([k]) => k !== "file" && k !== "artifact"
+    ([k]) => k !== "file" && k !== "artifact" && k !== "content"
   )
   if (entries.length === 0) return null
   return (
@@ -98,9 +99,16 @@ function MessageRow({
   const phase = PHASES[PHASE_INDEX[message.phase]]
   const target = message.targetAgent ? AGENTS[message.targetAgent] : null
   const hasFile = typeof message.payload?.file === "string"
+  const content =
+    typeof message.payload?.content === "string"
+      ? message.payload.content.trim()
+      : ""
+  const isArtifact = message.type === "artifact_created"
   const hasDetails =
     message.payload &&
-    Object.keys(message.payload).some((k) => k !== "file" && k !== "artifact")
+    Object.keys(message.payload).some(
+      (k) => k !== "file" && k !== "artifact" && k !== "content"
+    )
   const actionLabel =
     message.phase === "db_migration" ? "Review DB plan" : "View blocker"
 
@@ -150,9 +158,11 @@ function MessageRow({
           </span>
         </div>
 
-        <p className="mt-1 font-mono text-[12.5px] leading-snug text-foreground/90">
-          {message.summary}
-        </p>
+        {(!content || isArtifact) && (
+          <p className="mt-1 font-mono text-[12.5px] leading-snug text-foreground/90">
+            {message.summary}
+          </p>
+        )}
 
         {hasFile && (
           <span className="mt-2 inline-flex items-center gap-1.5 border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
@@ -176,6 +186,18 @@ function MessageRow({
               >
                 {actionLabel}
               </Button>
+            )}
+          </div>
+        )}
+
+        {content && (
+          <div className="mt-2 max-h-72 overflow-y-auto border border-border/70 bg-muted/20 p-2.5">
+            {isArtifact ? (
+              <pre className="overflow-x-auto font-mono text-[11px] leading-relaxed text-foreground/85">
+                <code>{content}</code>
+              </pre>
+            ) : (
+              <Markdown content={content} />
             )}
           </div>
         )}
@@ -206,6 +228,7 @@ export function BandFeed({
   onAction,
   now,
   className,
+  showHeader = true,
 }: {
   run: Run
   messages: AgentMessageVM[]
@@ -216,6 +239,7 @@ export function BandFeed({
   onAction?: (m: AgentMessageVM) => void
   now: number
   className?: string
+  showHeader?: boolean
 }) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = React.useState(true)
@@ -269,27 +293,29 @@ export function BandFeed({
       className={cn("relative flex min-h-0 flex-col", className)}
       aria-label="Band room feed"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-xs font-semibold text-muted-foreground uppercase">
-            Band room <span>{run.bandRoomName}</span>
-          </h2>
+      {showHeader && (
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="truncate text-xs font-semibold text-muted-foreground uppercase">
+              Band room <span>{run.bandRoomName}</span>
+            </h2>
+          </div>
+          {hasFilter ? (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="inline-flex items-center gap-1 text-[11px] text-signal outline-none hover:underline focus-visible:underline"
+            >
+              <IconX className="size-3" />
+              Clear filter
+            </button>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              {filtered.length} messages
+            </span>
+          )}
         </div>
-        {hasFilter ? (
-          <button
-            type="button"
-            onClick={onClearFilters}
-            className="inline-flex items-center gap-1 text-[11px] text-signal outline-none hover:underline focus-visible:underline"
-          >
-            <IconX className="size-3" />
-            Clear filter
-          </button>
-        ) : (
-          <span className="text-[11px] text-muted-foreground">
-            {filtered.length} messages
-          </span>
-        )}
-      </div>
+      )}
 
       <div
         ref={scrollRef}

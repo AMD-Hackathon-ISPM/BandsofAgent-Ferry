@@ -14,12 +14,13 @@ import (
 type SourceProvider struct {
 	pat   string
 	rdb   *redis.Client
+	app   *github.App // GitHub App, for minting per-repo installation tokens; nil if unconfigured
 	mu    sync.Mutex
 	cache map[string]string
 }
 
-func NewSourceProvider(pat string, rdb *redis.Client) *SourceProvider {
-	return &SourceProvider{pat: pat, rdb: rdb, cache: make(map[string]string)}
+func NewSourceProvider(pat string, rdb *redis.Client, app *github.App) *SourceProvider {
+	return &SourceProvider{pat: pat, rdb: rdb, app: app, cache: make(map[string]string)}
 }
 
 func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
@@ -58,14 +59,34 @@ func (s *SourceProvider) Token(ctx context.Context, userID string) string {
 	return s.resolveToken(ctx, userID)
 }
 
-// WriteToken resolves the token used for mutating GitHub operations. Prefer the
-// configured PAT because OAuth login tokens can be read-oriented or stale while
-// GITHUB_PAT is the operator-controlled credential intended for PR creation.
-func (s *SourceProvider) WriteToken(ctx context.Context, userID string) string {
-	if s.pat != "" {
-		return s.pat
+// WriteTokens returns the candidate credentials for pushing to owner/repo, in
+// priority order and de-duplicated: (1) a GitHub App installation token for the
+// repo — the preferred, no-PAT path that works once the user has installed the
+// App; (2) the run creator's login token; (3) the operator PAT. The caller
+// tries each in turn, so a credential without write access falls through.
+func (s *SourceProvider) WriteTokens(ctx context.Context, userID, owner, repo string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(t string) {
+		if t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
 	}
-	return s.resolveToken(ctx, userID)
+	if s.app != nil {
+		if t, err := s.app.InstallationToken(ctx, owner, repo); err == nil {
+			add(t)
+		} else {
+			log.Printf("github app installation token unavailable for %s/%s: %v", owner, repo, err)
+		}
+	}
+	if s.rdb != nil && userID != "" {
+		if t, err := s.rdb.Get(ctx, "github_token:"+userID).Result(); err == nil {
+			add(t)
+		}
+	}
+	add(s.pat)
+	return out
 }
 
 func (s *SourceProvider) resolveToken(ctx context.Context, userID string) string {

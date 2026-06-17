@@ -3,6 +3,28 @@ import * as React from "react"
 import { isLive } from "@/lib/domain"
 import type { AgentMessageVM, AgentRuntime, Run } from "@/lib/types"
 import { API_URL } from "@/lib/api"
+import { USE_DUMMY_DATA } from "@/lib/dev-mode"
+import { subscribeRun } from "@/lib/mock/stream"
+
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = React.useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false
+    return window.matchMedia(query).matches
+  })
+  React.useEffect(() => {
+    if (!window.matchMedia) return
+    const mq = window.matchMedia(query)
+    const onChange = () => setMatches(mq.matches)
+    onChange()
+    mq.addEventListener("change", onChange)
+    return () => mq.removeEventListener("change", onChange)
+  }, [query])
+  return matches
+}
+
+export function usePrefersReducedMotion(): boolean {
+  return useMediaQuery("(prefers-reduced-motion: reduce)")
+}
 
 export function useNow(intervalMs = 1000): number {
   const [now, setNow] = React.useState(() => Date.now())
@@ -32,10 +54,35 @@ function getStoredToken(): string {
 export function useLiveRun(run: Run): LiveRunState {
   const [messages, setMessages] = React.useState<AgentMessageVM[]>(run.messages)
   const [agents, setAgents] = React.useState<AgentRuntime[]>(run.agents)
-  const [streamedIds, setStreamedIds] = React.useState<Set<string>>(() => new Set())
+  const [streamedIds, setStreamedIds] = React.useState<Set<string>>(
+    () => new Set()
+  )
 
   React.useEffect(() => {
     if (!isLive(run.status)) return
+
+    const handleMessage = (msg: AgentMessageVM) => {
+      setStreamedIds((prev) => new Set(prev).add(msg.id))
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+      )
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.key === msg.agent
+            ? {
+                ...a,
+                status:
+                  a.status === "idle" || a.status === "waiting"
+                    ? "active"
+                    : a.status,
+                lastActionAt: msg.createdAt,
+              }
+            : a
+        )
+      )
+    }
+
+    if (USE_DUMMY_DATA) return subscribeRun(run.id, handleMessage)
 
     const token = getStoredToken()
     const url = `${API_URL}/api/runs/${run.id}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`
@@ -43,25 +90,7 @@ export function useLiveRun(run: Run): LiveRunState {
 
     es.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as AgentMessageVM
-        setStreamedIds((prev) => new Set(prev).add(msg.id))
-        setMessages((prev) =>
-          prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
-        )
-        setAgents((prev) =>
-          prev.map((a) =>
-            a.key === msg.agent
-              ? {
-                  ...a,
-                  status:
-                    a.status === "idle" || a.status === "waiting"
-                      ? "active"
-                      : a.status,
-                  lastActionAt: msg.createdAt,
-                }
-              : a,
-          ),
-        )
+        handleMessage(JSON.parse(event.data) as AgentMessageVM)
       } catch {
         // ignore malformed SSE messages
       }

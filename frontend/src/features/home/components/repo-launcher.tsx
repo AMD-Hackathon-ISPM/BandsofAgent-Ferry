@@ -17,6 +17,7 @@ import {
 } from "@/lib/domain"
 import {
   createRun,
+  fetchAppInstallation,
   fetchRepoSuggestions,
   resolveRepo,
   type MigrationRisk,
@@ -92,6 +93,10 @@ export function RepoLauncher({ className }: { className?: string }) {
   const [target, setTarget] = React.useState<TargetLanguage>("go")
   const [dbEnabled, setDbEnabled] = React.useState(false)
   const [launching, setLaunching] = React.useState(false)
+  const [installState, setInstallState] = React.useState<
+    "idle" | "checking" | "installed" | "needed"
+  >("idle")
+  const [installUrl, setInstallUrl] = React.useState("")
   const pickerRef = React.useRef<HTMLDivElement>(null)
   const seq = React.useRef(0)
 
@@ -114,9 +119,27 @@ export function RepoLauncher({ className }: { className?: string }) {
     }
   }, [accessToken])
 
+  // Check whether the Ferry GitHub App is installed on a repo (so it can push).
+  // Called from event handlers (resolve, re-check, focus), never synchronously
+  // inside an effect.
+  const loadInstall = React.useCallback(
+    (target: ResolvedRepo) => {
+      if (!accessToken) return
+      setInstallState("checking")
+      fetchAppInstallation(accessToken, `${target.owner}/${target.name}`)
+        .then((res) => {
+          setInstallState(res.installed ? "installed" : "needed")
+          setInstallUrl(res.installUrl)
+        })
+        .catch(() => setInstallState("installed"))
+    },
+    [accessToken],
+  )
+
   const run = React.useCallback(
     async (value: string) => {
       const trimmed = value.trim()
+      setInstallState("idle")
       if (!trimmed) {
         setPhase("idle")
         setReason(null)
@@ -151,8 +174,9 @@ export function RepoLauncher({ className }: { className?: string }) {
       setSource(result.repo.detectedLanguage)
       setReason(null)
       setPhase("resolved")
+      loadInstall(result.repo)
     },
-    [accessToken],
+    [accessToken, loadInstall],
   )
 
   const repoOptions = React.useMemo(() => {
@@ -187,14 +211,14 @@ export function RepoLauncher({ className }: { className?: string }) {
   }
 
   const launch = async () => {
-    if (!repo || !accessToken || launching) return
+    if (!repo || !accessToken || launching || installState === "needed") return
     setLaunching(true)
     try {
       const result = await createRun(accessToken, `${repo.owner}/${repo.name}`, branch, source, target, dbEnabled)
       toast.success("Migration launched", {
         description: `${repo.owner}/${repo.name}@${branch} → ${target === "go" ? "Go" : "Rust"}. Assembling the band.`,
       })
-      navigate(`/runs/${result.id}`)
+      navigate(`/runs/${result.id}`, { state: { justLaunched: true } })
     } catch (err) {
       toast.error("Failed to launch migration", {
         description: err instanceof Error ? err.message : "Something went wrong.",
@@ -203,6 +227,14 @@ export function RepoLauncher({ className }: { className?: string }) {
       setLaunching(false)
     }
   }
+
+  // After the user installs in the GitHub tab and returns, re-check on focus.
+  React.useEffect(() => {
+    if (installState !== "needed" || !repo) return
+    const onFocus = () => loadInstall(repo)
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [installState, repo, loadInstall])
 
   const invalid = phase === "error"
 
@@ -457,10 +489,49 @@ export function RepoLauncher({ className }: { className?: string }) {
                 />
               </div>
 
-              <Button onClick={launch} disabled={launching} className="w-full">
-                {launching ? "Launching…" : "Launch migration"}
-                <IconArrowRight data-icon="inline-end" />
-              </Button>
+              {installState === "needed" ? (
+                <div className="flex flex-col gap-2 border border-warning/35 bg-warning/10 p-3">
+                  <p className="text-xs text-warning">
+                    Ferry needs write access to open the pull request. Install
+                    the Ferry GitHub App on{" "}
+                    <span className="font-mono">
+                      {repo.owner}/{repo.name}
+                    </span>
+                    , then re-check.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      asChild
+                      className="flex-1"
+                      disabled={!installUrl}
+                    >
+                      <a href={installUrl} target="_blank" rel="noreferrer">
+                        <IconBrandGithub data-icon="inline-start" />
+                        Install Ferry on this repo
+                      </a>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => repo && loadInstall(repo)}
+                    >
+                      Re-check
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  onClick={launch}
+                  disabled={launching || installState === "checking"}
+                  className="w-full"
+                >
+                  {launching
+                    ? "Launching…"
+                    : installState === "checking"
+                      ? "Checking access…"
+                      : "Launch migration"}
+                  <IconArrowRight data-icon="inline-end" />
+                </Button>
+              )}
             </div>
           )}
         </FieldGroup>

@@ -16,7 +16,7 @@ React, TypeScript, Vite, Tailwind CSS, and shadcn/ui frontend for Ferry migratio
 
 ## Scripts
 
-- `npm run dev`: Start the Vite dev server.
+- `npm run dev`: Start the Vite dev server with local dummy data by default; use `VITE_USE_DUMMIES=false npm run dev` to use the backend and GitHub OAuth locally.
 - `npm run build`: Type-check and build.
 - `npm run lint`: Run ESLint.
 - `npm run typecheck`: Run TypeScript without emitting.

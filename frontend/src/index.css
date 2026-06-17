@@ -225,6 +225,9 @@
 }
 
 @layer utilities {
+  .pixel-canvas {
+    image-rendering: pixelated;
+  }
   .dot-pulse {
     animation: var(--animate-dot-pulse);
   }
@@ -283,6 +286,27 @@
         transparent 1px
       );
     background-size: 44px 44px;
+  }
+
+  .harbor-beacon {
+    animation: harbor-beacon 1.6s ease-in-out infinite;
+  }
+  .harbor-flash {
+    animation: harbor-flash 0.9s steps(1, end) infinite;
+  }
+  .harbor-load {
+    animation: harbor-load 2.4s ease-in-out infinite;
+  }
+  .harbor-bob {
+    animation: harbor-bob 3s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .harbor-flow {
+    animation: flow-dash 0.8s linear infinite;
+  }
+  .sea-shimmer {
+    animation: sea-shimmer 7s ease-in-out infinite;
   }
 }
 
@@ -366,6 +390,59 @@
   }
 }
 
+@keyframes harbor-beacon {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes harbor-flash {
+  0%,
+  49% {
+    opacity: 0.7;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes harbor-load {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+@keyframes harbor-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-0.6deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(0.6deg);
+  }
+}
+
+@keyframes sea-shimmer {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translateX(6px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -380,7 +457,13 @@
   .data-transfer,
   .phase-active-glow::after,
   .running-dots > span,
-  .caret-blink::after {
+  .caret-blink::after,
+  .harbor-beacon,
+  .harbor-flash,
+  .harbor-load,
+  .harbor-bob,
+  .harbor-flow,
+  .sea-shimmer {
     animation: none !important;
   }
 }

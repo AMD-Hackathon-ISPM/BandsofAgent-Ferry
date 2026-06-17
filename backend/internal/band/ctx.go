@@ -3,6 +3,7 @@ package band
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -13,13 +14,14 @@ type RunCtx struct {
 	Tgt    string
 	User   string
 	Run    string
+	Rework int // how many times the Commander has bounced the run back for rework
 }
 
 var ctxRe = regexp.MustCompile(`\[ferry-ctx ([^\]]*)\]`)
 var kvRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 func MarshalCtx(c RunCtx) string {
-	return fmt.Sprintf(`[ferry-ctx repo=%q branch=%q src=%q tgt=%q user=%q run=%q]`, c.Repo, c.Branch, c.Src, c.Tgt, c.User, c.Run)
+	return fmt.Sprintf(`[ferry-ctx repo=%q branch=%q src=%q tgt=%q user=%q run=%q rework="%d"]`, c.Repo, c.Branch, c.Src, c.Tgt, c.User, c.Run, c.Rework)
 }
 
 func ParseCtx(content string) (RunCtx, bool) {
@@ -42,6 +44,8 @@ func ParseCtx(content string) (RunCtx, bool) {
 			c.User = kv[2]
 		case "run":
 			c.Run = kv[2]
+		case "rework":
+			c.Rework, _ = strconv.Atoi(kv[2])
 		}
 	}
 	return c, c.Repo != ""

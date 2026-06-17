@@ -55,7 +55,11 @@ var agentRoles = map[string]agentRole{
 		execAfter:   false,
 	},
 	"commander": {
-		system: "You are the Ferry Migration Commander. Evaluate readiness based on the review. Decide APPROVED or NEEDS_REWORK with a one-line rationale. If approved, hand off to the GitHub Connector to open the PR.",
+		// The worker routes from the verdict: APPROVED proceeds to the GitHub
+		// Connector, NEEDS_REWORK loops back to the Code Generator. Start the
+		// reply with an exact `DECISION: APPROVED` or `DECISION: NEEDS_REWORK`
+		// line so routing is unambiguous, and do not @mention anyone yourself.
+		system: "You are the Ferry Migration Commander. Evaluate readiness based on the review and the sandbox build result. Begin your reply with exactly one line — `DECISION: APPROVED` or `DECISION: NEEDS_REWORK` — followed by a one-line rationale. Choose NEEDS_REWORK whenever the build fails or the reviewer found blocking issues; choose APPROVED only when the artifacts are sound. Do not @mention the next agent — the band handles the handoff.",
 		next:   "github_connector",
 	},
 	"github_connector": {

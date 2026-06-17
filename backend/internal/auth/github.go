@@ -60,6 +60,16 @@ func (h *GitHubHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Post-installation return. When "Request OAuth during installation" is on,
+	// GitHub redirects here (not the Setup URL) after a user installs the App,
+	// with installation_id + setup_action and a state we never issued. The user
+	// is already logged in and pushes use installation tokens, so there's nothing
+	// to exchange — just send them back to the app to continue.
+	if r.URL.Query().Get("installation_id") != "" || r.URL.Query().Get("setup_action") != "" {
+		http.Redirect(w, r, h.cfg.FrontendURL+"/?github_app=installed", http.StatusTemporaryRedirect)
+		return
+	}
+
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 
@@ -103,6 +113,18 @@ func (h *GitHubHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, frontendCallback+"?"+params.Encode(), http.StatusTemporaryRedirect)
+}
+
+// HandleSetup is the GitHub App "Setup URL" target: GitHub redirects here after
+// a user installs (or updates) the App on their repositories. We don't need to
+// persist the installation — installation tokens are minted per-repo on demand
+// from the App key — so we just bounce the user back to the app to continue.
+func (h *GitHubHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
+	dest := h.cfg.FrontendURL + "/?github_app=installed"
+	if state := r.URL.Query().Get("state"); state != "" {
+		dest = state
+	}
+	http.Redirect(w, r, dest, http.StatusTemporaryRedirect)
 }
 
 func (h *GitHubHandler) exchangeCode(ctx context.Context, code string) (string, error) {
