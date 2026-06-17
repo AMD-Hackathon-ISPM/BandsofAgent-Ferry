@@ -8,19 +8,17 @@ import (
 
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/github"
-	"github.com/redis/go-redis/v9"
 )
 
 type SourceProvider struct {
-	pat   string
-	rdb   *redis.Client
-	app   *github.App // GitHub App, for minting per-repo installation tokens; nil if unconfigured
-	mu    sync.Mutex
-	cache map[string]string
+	tokens *github.UserTokens // resolves/re-mints the user's GitHub token (falls back to PAT)
+	app    *github.App        // GitHub App, for minting per-repo installation tokens; nil if unconfigured
+	mu     sync.Mutex
+	cache  map[string]string
 }
 
-func NewSourceProvider(pat string, rdb *redis.Client, app *github.App) *SourceProvider {
-	return &SourceProvider{pat: pat, rdb: rdb, app: app, cache: make(map[string]string)}
+func NewSourceProvider(tokens *github.UserTokens, app *github.App) *SourceProvider {
+	return &SourceProvider{tokens: tokens, app: app, cache: make(map[string]string)}
 }
 
 func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
@@ -40,7 +38,7 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 	}
 	s.mu.Unlock()
 
-	gh := github.NewClient(s.resolveToken(ctx, rc.User))
+	gh := github.NewClient(s.tokens.Token(ctx, rc.User))
 	digest, err := gh.FetchSourceDigest(ctx, owner, name, rc.Branch, rc.Src)
 	if err != nil {
 		log.Printf("source fetch failed for %s: %v", rc.Repo, err)
@@ -56,7 +54,7 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 // Token resolves the GitHub token for read operations. The user's OAuth token
 // keeps repository discovery aligned with what they can see in the UI.
 func (s *SourceProvider) Token(ctx context.Context, userID string) string {
-	return s.resolveToken(ctx, userID)
+	return s.tokens.Token(ctx, userID)
 }
 
 // WriteTokens returns the candidate credentials for pushing to owner/repo, in
@@ -80,22 +78,9 @@ func (s *SourceProvider) WriteTokens(ctx context.Context, userID, owner, repo st
 			log.Printf("github app installation token unavailable for %s/%s: %v", owner, repo, err)
 		}
 	}
-	if s.rdb != nil && userID != "" {
-		if t, err := s.rdb.Get(ctx, "github_token:"+userID).Result(); err == nil {
-			add(t)
-		}
-	}
-	add(s.pat)
+	add(s.tokens.LoginToken(ctx, userID)) // user's GitHub token, re-minted if expired
+	add(s.tokens.PAT())                   // operator fallback
 	return out
-}
-
-func (s *SourceProvider) resolveToken(ctx context.Context, userID string) string {
-	if s.rdb != nil && userID != "" {
-		if t, err := s.rdb.Get(ctx, "github_token:"+userID).Result(); err == nil && t != "" {
-			return t
-		}
-	}
-	return s.pat
 }
 
 func splitRepo(full string) (owner, name string, ok bool) {

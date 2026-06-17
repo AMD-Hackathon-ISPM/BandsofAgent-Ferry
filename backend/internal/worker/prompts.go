@@ -27,7 +27,7 @@ var agentRoles = map[string]agentRole{
 		needsSource: true,
 	},
 	"code_generator": {
-		system:        "You are the Ferry Code Generator. Using the actual source, analysis, and business rules, convert the legacy code to the target language (Go or Rust), preserving behavior. Output EVERY generated file as a fenced code block whose first line is `// file: <path>` (e.g. `// file: cmd/main.go`); include a go.mod or Cargo.toml. Then hand off to the DB Migrator.",
+		system:        "You are the Ferry Code Generator. Using the actual source, analysis, and business rules, convert the legacy code to the EXACT language named in the MIGRATION TARGET LANGUAGE line of the message — output ONLY that language. Do not pick a different language: if it says Go, write Go (with a go.mod); if it says Rust, write Rust (with a Cargo.toml). Preserve behavior. Output EVERY generated file as a fenced code block whose first line is `// file: <path>` (e.g. `// file: cmd/main.go`). NEVER emit real secrets or configuration values — no API keys, tokens, passwords, hosts, or connection strings, neither hardcoded nor in any .env, .env.example, or config file. Read all configuration from environment variables at runtime; if you include an example env file, use ONLY key names with empty or obviously-fake placeholder values. Then hand off to the DB Migrator.",
 		next:          "db_migration",
 		needsSource:   true,
 		producesFiles: true,
@@ -38,7 +38,7 @@ var agentRoles = map[string]agentRole{
 		needsSource: true,
 	},
 	"test_generator": {
-		system:        "You are the Ferry Test Generator. Write unit/integration tests for the generated code, grounded in the real source. Output each test file as a fenced code block preceded by `// file: <path>` (e.g. `// file: main_test.go`) so it can be executed. Then hand off to the Reviewer.",
+		system:        "You are the Ferry Test Generator. Write tests in the EXACT language named in the MIGRATION TARGET LANGUAGE line — the same language the Code Generator produced, NOT the source language. Use the legacy source ONLY to understand expected behavior. Use the target language's idiomatic test framework — Go: the `testing` package in `*_test.go` files; Rust: `#[cfg(test)]` modules or files under `tests/`. The tests MUST compile and run against the generated target files. Output each test file as a fenced code block preceded by `// file: <path>` (Go: `// file: foo_test.go`; Rust: `// file: tests/foo.rs`). Never include real secrets or env values. Then hand off to the Reviewer.",
 		next:          "reviewer",
 		needsSource:   true,
 		execCode:      true,

@@ -8,25 +8,19 @@ import (
 	"strings"
 
 	"github.com/ferry/backend/internal/http/middleware"
-	"github.com/redis/go-redis/v9"
 )
 
 type Handler struct {
-	rdb         *redis.Client
-	fallbackPAT string
-	app         *App
+	tokens *UserTokens
+	app    *App
 }
 
-func NewHandler(rdb *redis.Client, fallbackPAT string, app *App) *Handler {
-	return &Handler{rdb: rdb, fallbackPAT: fallbackPAT, app: app}
+func NewHandler(tokens *UserTokens, app *App) *Handler {
+	return &Handler{tokens: tokens, app: app}
 }
 
 func (h *Handler) clientForUser(ctx context.Context, userID string) *Client {
-	token, err := h.rdb.Get(ctx, "github_token:"+userID).Result()
-	if err != nil || token == "" {
-		token = h.fallbackPAT
-	}
-	return NewClient(token)
+	return NewClient(h.tokens.Token(ctx, userID))
 }
 
 func (h *Handler) ResolveRepo(w http.ResponseWriter, r *http.Request) {
