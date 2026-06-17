@@ -5,7 +5,7 @@ import {
   IconChevronRight,
   IconCircleCheck,
   IconClock,
-  IconDownload,
+  IconCode,
   IconExternalLink,
   IconGitBranch,
 } from "@tabler/icons-react"
@@ -28,6 +28,12 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { toneDotBg, toneSoft } from "@/features/migrations/components/tone"
+
+// Lazy so Shiki + the Pierre file tree stay out of the initial bundle and load
+// only when a code viewer is first opened.
+const CodeViewerDialog = React.lazy(
+  () => import("@/features/runs/components/code-viewer")
+)
 
 function ToneChip({
   tone,
@@ -296,56 +302,44 @@ function PullRequestCard({ run }: { run: Run }) {
   )
 }
 
-function ArtifactRow({ artifact }: { artifact: Artifact }) {
+function ArtifactRow({
+  artifact,
+  onOpen,
+}: {
+  artifact: Artifact
+  onOpen: (path: string) => void
+}) {
   const meta = ARTIFACT_TYPES[artifact.type]
   const Icon = meta.icon
   return (
-    <Collapsible className="border border-border">
-      <div className="flex items-center gap-2.5 px-2.5 py-2">
-        <Icon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-mono text-[12px] text-foreground">
-            {artifact.fileName}
-          </span>
-          <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <AgentGlyph agent={artifact.createdBy} size="sm" />
-            <span className="tabular">{formatBytes(artifact.sizeBytes)}</span>
-          </span>
+    <button
+      type="button"
+      onClick={() => onOpen(artifact.fileName)}
+      aria-label={`View ${artifact.fileName}`}
+      className="group/row flex w-full items-center gap-2.5 border border-border px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-mono text-[12px] text-foreground">
+          {artifact.fileName}
         </span>
-        <div className="flex items-center gap-0.5">
-          {artifact.preview && (
-            <CollapsibleTrigger asChild>
-              <Button
-                size="xs"
-                variant="ghost"
-                className="group/pv text-muted-foreground"
-              >
-                <IconChevronRight className="transition-transform group-data-[state=open]/pv:rotate-90" />
-                Preview
-              </Button>
-            </CollapsibleTrigger>
-          )}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label={`Download ${artifact.fileName}`}
-            className="text-muted-foreground"
-            onClick={() => toast(`Downloading ${artifact.fileName}`)}
-          >
-            <IconDownload />
-          </Button>
-        </div>
-      </div>
-      {artifact.preview && (
-        <CollapsibleContent className="border-t border-border p-2.5">
-          <CodePreview code={artifact.preview} />
-        </CollapsibleContent>
-      )}
-    </Collapsible>
+        <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <AgentGlyph agent={artifact.createdBy} size="sm" />
+          <span className="tabular">{formatBytes(artifact.sizeBytes)}</span>
+        </span>
+      </span>
+      <IconCode className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100" />
+    </button>
   )
 }
 
-function ArtifactsSection({ run }: { run: Run }) {
+function ArtifactsSection({
+  run,
+  onOpen,
+}: {
+  run: Run
+  onOpen: (path?: string) => void
+}) {
   if (run.artifacts.length === 0) {
     return (
       <p className="px-1 py-6 text-center text-[12px] text-muted-foreground">
@@ -356,6 +350,15 @@ function ArtifactsSection({ run }: { run: Run }) {
   return (
     <OutputDisclosure title="Artifacts" count={run.artifacts.length}>
       <div className="flex flex-col gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="self-start"
+          onClick={() => onOpen()}
+        >
+          <IconCode data-icon="inline-start" />
+          Browse code
+        </Button>
         {ARTIFACT_GROUP_ORDER.map((group) => {
           const items = run.artifacts.filter(
             (a) => ARTIFACT_TYPES[a.type].group === group
@@ -368,7 +371,7 @@ function ArtifactsSection({ run }: { run: Run }) {
               </span>
               <div className="flex flex-col gap-1.5">
                 {items.map((a) => (
-                  <ArtifactRow key={a.id} artifact={a} />
+                  <ArtifactRow key={a.id} artifact={a} onOpen={onOpen} />
                 ))}
               </div>
             </div>
@@ -395,6 +398,18 @@ export function OutputsPanel({
   showHeader?: boolean
 }) {
   const empty = !run.dbPlan && !run.pr && run.artifacts.length === 0
+  const [viewerOpen, setViewerOpen] = React.useState(false)
+  const [everOpened, setEverOpened] = React.useState(false)
+  const [requestedPath, setRequestedPath] = React.useState<string | undefined>(
+    undefined
+  )
+
+  const openViewer = (path?: string) => {
+    setRequestedPath(path)
+    setEverOpened(true)
+    setViewerOpen(true)
+  }
+
   return (
     <section
       className={cn("flex flex-col", className)}
@@ -422,10 +437,20 @@ export function OutputsPanel({
               onApproveDbPlan={onApproveDbPlan}
             />
             {run.pr && <PullRequestCard run={run} />}
-            <ArtifactsSection run={run} />
+            <ArtifactsSection run={run} onOpen={openViewer} />
           </>
         )}
       </div>
+      {everOpened && (
+        <React.Suspense fallback={null}>
+          <CodeViewerDialog
+            artifacts={run.artifacts}
+            open={viewerOpen}
+            onOpenChange={setViewerOpen}
+            initialPath={requestedPath}
+          />
+        </React.Suspense>
+      )}
     </section>
   )
 }
