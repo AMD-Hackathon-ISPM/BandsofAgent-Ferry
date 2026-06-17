@@ -14,8 +14,8 @@ import (
 
 var fencedBlock = regexp.MustCompile("(?s)```([^\n]*)\n(.*?)```")
 
-var fileMarker = regexp.MustCompile(`(?i)^\s*(?://|#|--|/\*)?\s*file\s*:\s*([^\s*]+)\s*(?:\*/)?\s*$`)
-var barePathLine = regexp.MustCompile(`^(?:\./)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$`)
+var fileMarker = regexp.MustCompile(`(?i)^\s*(?://+|/|#|--|/\*)?\s*file\s*:\s*([^\s*]+)\s*(?:\*/)?\s*$`)
+var barePathLine = regexp.MustCompile(`^(?:\./)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$`)
 var exitMarker = regexp.MustCompile(`(?m)^---exit:(\d+)\s*$`)
 
 func extractFiles(content string) map[string]string {
@@ -31,7 +31,47 @@ func extractFiles(content string) map[string]string {
 		}
 		files[path] = code
 	}
+	extractRawFiles(content, files)
 	return files
+}
+
+func extractRawFiles(content string, files map[string]string) {
+	lines := strings.Split(normalizeNewlines(content), "\n")
+	currentPath := ""
+	var body []string
+
+	flush := func() {
+		if currentPath == "" {
+			body = nil
+			return
+		}
+		code := cleanRawFileBody(body)
+		if code != "" {
+			files[currentPath] = ensureTrailingNewline(code)
+		}
+		currentPath = ""
+		body = nil
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if mk := fileMarker.FindStringSubmatch(trimmed); mk != nil {
+			flush()
+			if path, ok := sanitizeFilePath(mk[1]); ok {
+				currentPath = path
+			}
+			continue
+		}
+		if currentPath == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "@Ferry") || strings.HasPrefix(trimmed, "[ferry-artifact ") {
+			flush()
+			continue
+		}
+		body = append(body, line)
+	}
+	flush()
 }
 
 func extractFileFromFence(content string, matches [][]int, i int, info, body string) (path, code string, ok bool) {
@@ -118,6 +158,30 @@ func ensureTrailingNewline(s string) string {
 	return strings.TrimRight(s, "\n") + "\n"
 }
 
+func cleanRawFileBody(lines []string) string {
+	body := strings.Join(lines, "\n")
+	body = strings.TrimLeft(body, "\n")
+	body = strings.TrimRight(body, "\n")
+	if body == "" {
+		return ""
+	}
+
+	parts := strings.Split(body, "\n")
+	if len(parts) > 0 && strings.HasPrefix(strings.TrimSpace(parts[0]), "```") {
+		parts = parts[1:]
+	}
+	if len(parts) > 0 && strings.TrimSpace(parts[len(parts)-1]) == "```" {
+		parts = parts[:len(parts)-1]
+	}
+	for len(parts) > 0 && strings.TrimSpace(parts[len(parts)-1]) == "---" {
+		parts = parts[:len(parts)-1]
+	}
+	for len(parts) > 0 && strings.TrimSpace(parts[len(parts)-1]) == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return strings.Join(parts, "\n")
+}
+
 type codeCheckResult struct {
 	kind    string
 	status  string
@@ -186,15 +250,11 @@ func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bo
 		if mode == "test" {
 			cmd = "go test ./..."
 		}
-		prefix := ""
-		if !hasFile(files, "go.mod") {
-			prefix = "go mod init ferrygen >/dev/null 2>&1; "
-		}
 		// The sandbox rootfs is mounted read-only, so Go's default cache/state
 		// dirs under /root are unwritable. Point HOME and the Go caches at the
 		// /tmp tmpfs (rw) so the build cache can initialize.
 		env := "export HOME=/tmp GOCACHE=/tmp/.cache/go-build GOPATH=/tmp/go GOMODCACHE=/tmp/go/pkg/mod GOTMPDIR=/tmp; "
-		script := fmt.Sprintf("%s%s%s 2>&1; rc=$?; echo \"---exit:$rc\"; exit $rc", env, prefix, cmd)
+		script := goSandboxScript(env, cmd, hasFile(files, "go.mod"))
 		return sandbox.Spec{Image: "golang:1.25-alpine", Files: files, Script: script, Timeout: 180 * time.Second}, true
 	case "rust":
 		// Same read-only rootfs constraint: cargo writes to $CARGO_HOME (default
@@ -212,6 +272,19 @@ func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bo
 	default:
 		return sandbox.Spec{}, false
 	}
+}
+
+func goSandboxScript(env, cmd string, hasGoMod bool) string {
+	init := ""
+	if !hasGoMod {
+		init = "if [ ! -f go.mod ]; then go mod init ferrygen >/dev/null 2>&1; fi; "
+	}
+	return fmt.Sprintf(
+		"%s%s{ go mod tidy; } 2>&1; prep_rc=$?; if [ $prep_rc -ne 0 ]; then echo \"---exit:$prep_rc\"; exit $prep_rc; fi; %s 2>&1; rc=$?; echo \"---exit:$rc\"; exit $rc",
+		env,
+		init,
+		cmd,
+	)
 }
 
 func normalizeSandboxResult(res sandbox.Result) sandbox.Result {

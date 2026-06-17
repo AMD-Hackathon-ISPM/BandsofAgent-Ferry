@@ -39,6 +39,58 @@ func TestExtractFilesSkipsUnsafePaths(t *testing.T) {
 	}
 }
 
+func TestExtractFilesFromRawSections(t *testing.T) {
+	content := `// file: go.mod
+module ferry-booking
+
+go 1.23
+---
+// file: cmd/main.go
+package main
+
+func main() {}
+`
+	files := extractFiles(content)
+	if got := files["go.mod"]; !strings.Contains(got, "module ferry-booking") {
+		t.Fatalf("expected raw go.mod to be extracted, got %q", got)
+	}
+	if got := files["cmd/main.go"]; !strings.Contains(got, "func main() {}") {
+		t.Fatalf("expected raw cmd/main.go to be extracted, got %q", got)
+	}
+}
+
+func TestExtractFilesAcceptsSingleSlashHeader(t *testing.T) {
+	content := `/ file: go.mod
+module ferry-booking
+`
+	files := extractFiles(content)
+	if got := files["go.mod"]; !strings.Contains(got, "module ferry-booking") {
+		t.Fatalf("expected single-slash file header to be extracted, got %q", got)
+	}
+}
+
+func TestExtractFilesAcceptsFileHeaderVariants(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{name: "double slash spaced", header: "// file: go.mod"},
+		{name: "single slash spaced", header: "/ file: go.mod"},
+		{name: "single slash tight", header: "/file: go.mod"},
+		{name: "double slash tight", header: "//file: go.mod"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := tc.header + "\nmodule ferry-booking\n"
+			files := extractFiles(content)
+			if got := files["go.mod"]; !strings.Contains(got, "module ferry-booking") {
+				t.Fatalf("expected variant %q to be extracted, got %q", tc.header, got)
+			}
+		})
+	}
+}
+
 func TestNormalizeSandboxResultUsesExitMarker(t *testing.T) {
 	res := normalizeSandboxResult(sandbox.Result{
 		Output:   "go test failed\n---exit:1\n",
@@ -66,5 +118,36 @@ cmd/main.go:12:2: no required module provides package github.com/joho/godotenv
 	}
 	if !strings.Contains(summary, "pattern *.sql: no matching files found") {
 		t.Fatalf("expected missing sql asset in summary, got %q", summary)
+	}
+}
+
+func TestSpecForGoRunsModTidyWithExistingGoMod(t *testing.T) {
+	spec, ok := specFor("go", "test", map[string]string{
+		"go.mod":      "module ferrygen\n\ngo 1.23\n",
+		"cmd/main.go": "package main\nfunc main() {}\n",
+	})
+	if !ok {
+		t.Fatalf("expected go spec")
+	}
+	if !strings.Contains(spec.Script, "go mod tidy") {
+		t.Fatalf("expected go sandbox script to run go mod tidy, got %q", spec.Script)
+	}
+	if strings.Contains(spec.Script, "go mod init ferrygen") {
+		t.Fatalf("did not expect go mod init when go.mod already exists")
+	}
+}
+
+func TestSpecForGoBootstrapsModuleWhenMissingGoMod(t *testing.T) {
+	spec, ok := specFor("go", "build", map[string]string{
+		"cmd/main.go": "package main\nfunc main() {}\n",
+	})
+	if !ok {
+		t.Fatalf("expected go spec")
+	}
+	if !strings.Contains(spec.Script, "go mod init ferrygen") {
+		t.Fatalf("expected go sandbox script to initialize module, got %q", spec.Script)
+	}
+	if !strings.Contains(spec.Script, "go mod tidy") {
+		t.Fatalf("expected go sandbox script to run go mod tidy after init, got %q", spec.Script)
 	}
 }
