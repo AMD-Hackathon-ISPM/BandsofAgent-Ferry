@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   IconAlertTriangle,
@@ -14,7 +14,7 @@ import {
 
 import { canApprove, isLive } from "@/lib/domain"
 import type { AgentKey, PhaseKey } from "@/lib/domain"
-import { fetchRun } from "@/lib/api"
+import { fetchRun, startRun } from "@/lib/api"
 import { useLiveRun, useMediaQuery, useNow } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
 import { cn } from "@/lib/utils"
@@ -151,6 +151,8 @@ function RunReady({
   pane: string
   setPane: (p: string) => void
 }) {
+  const { accessToken } = useAuth()
+  const queryClient = useQueryClient()
   const { messages, agents, streamedIds } = useLiveRun(run)
   const liveRun = { ...run, agents, messages }
   const userCanApprove = canApprove(role)
@@ -177,11 +179,34 @@ function RunReady({
     run.status === "pending" || justLaunched ? "loading" : "normal"
   )
   const loading = phase === "loading"
+  const startedRef = React.useRef(false)
   const onDeparted = React.useCallback(() => {
     setPhase("normal")
     if (justLaunched)
       navigate(location.pathname, { replace: true, state: null })
-  }, [justLaunched, navigate, location.pathname])
+    // The ferry has left the harbor → start the migration automatically; no
+    // separate Run press needed. Guarded so it fires at most once per view.
+    if (run.status === "pending" && !startedRef.current) {
+      startedRef.current = true
+      startRun(accessToken ?? "", run.id)
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: ["run", run.id] })
+        )
+        .catch(() =>
+          toast.error("Couldn't start the migration", {
+            description: "Use the Run button to retry, or reload the page.",
+          })
+        )
+    }
+  }, [
+    justLaunched,
+    navigate,
+    location.pathname,
+    run.status,
+    run.id,
+    accessToken,
+    queryClient,
+  ])
 
   const handleAction = React.useCallback(() => {
     setPane("outputs")

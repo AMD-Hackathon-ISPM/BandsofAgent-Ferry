@@ -78,6 +78,12 @@ export function PhasePipeline({
   const states = phaseStates(run)
   const compact = density === "compact"
 
+  // Drop skipped stages (e.g. DB migration when it's disabled for this run) so
+  // they don't appear in the pipeline at all.
+  const nodes = PHASES.map((phase, i) => ({ phase, state: states[i] })).filter(
+    (n) => n.state !== "skipped"
+  )
+
   return (
     <div className={cn(compact ? "shrink-0" : "w-full", className)}>
       <ol
@@ -86,9 +92,8 @@ export function PhasePipeline({
           compact ? "justify-start" : "mx-auto w-full justify-center"
         )}
       >
-        {PHASES.map((phase, i) => {
-          const state = states[i]
-          const nextState = states[i + 1]
+        {nodes.map(({ phase, state }, i) => {
+          const nextState = nodes[i + 1]?.state
           const isSelected = selected === phase.key
           const interactive = state !== "skipped" && state !== "upcoming"
           const connectorActive = state === "done" && nextState === "active"
@@ -129,7 +134,7 @@ export function PhasePipeline({
                   )}
                 </button>
               </li>
-              {i < PHASES.length - 1 && (
+              {i < nodes.length - 1 && (
                 <li
                   aria-hidden="true"
                   className={cn(
