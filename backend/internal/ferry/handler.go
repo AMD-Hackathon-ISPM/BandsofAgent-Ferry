@@ -112,9 +112,9 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE migration_runs
-		    SET band_room_id = $1, status = 'planning', started_at = NOW()
+		    SET band_room_id = $1, status = 'planning', started_at = NOW(), db_migration_enabled = $4
 		  WHERE company_id = $2 AND id = $3`,
-		bandChatID, companyID, run.ID,
+		bandChatID, companyID, run.ID, req.DBMigrationEnabled,
 	); err != nil {
 		log.Printf("ferry: persist band room on run failed: %v", err)
 	}

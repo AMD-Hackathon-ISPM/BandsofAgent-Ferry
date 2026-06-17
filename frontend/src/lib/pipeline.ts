@@ -30,8 +30,11 @@ export function currentPhaseIndex(run: Run): number {
 
 export function phaseStates(run: Run): PhaseNodeState[] {
   const idx = currentPhaseIndex(run)
+  // Per-run toggle when present (real runs), falling back to the project's
+  // setting (dev/mock data that doesn't carry a per-run flag).
+  const dbEnabled = run.dbEnabled ?? run.project.dbEnabled
   return PHASES.map((phase, i) => {
-    if (!run.project.dbEnabled && phase.key === "db_migration") return "skipped"
+    if (!dbEnabled && phase.key === "db_migration") return "skipped"
     if (run.status === "pending") return "upcoming"
     if (run.status === "completed") return "done"
     if (i < idx) return "done"

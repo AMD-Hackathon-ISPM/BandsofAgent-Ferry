@@ -94,6 +94,7 @@ export interface Run {
   startedAt?: string
   completedAt?: string
   errorMessage?: string
+  dbEnabled?: boolean
   agents: AgentRuntime[]
   messages: AgentMessageVM[]
   artifacts: Artifact[]
