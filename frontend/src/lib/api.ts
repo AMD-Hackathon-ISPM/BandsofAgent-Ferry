@@ -3,30 +3,137 @@ import { USE_DUMMY_DATA } from "@/lib/dev-mode"
 import { RECENT_RUNS, getRun } from "@/lib/mock/data"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
+const SESSION_KEY = "ferry.session"
 
-function authHeaders(accessToken: string) {
-  return { Authorization: `Bearer ${accessToken}` }
+interface StoredSession {
+  accessToken?: string
+  refreshToken?: string
+  [k: string]: unknown
+}
+
+function getSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    return raw ? (JSON.parse(raw) as StoredSession) : null
+  } catch {
+    return null
+  }
 }
 
 function getStoredToken(): string {
+  return getSession()?.accessToken ?? ""
+}
+
+// endSession clears the stored session and signals the app to route to login.
+// Called only on UNRECOVERABLE auth failures (no refresh token, or the refresh
+// token itself is rejected) — never on transient/network errors, so a blip
+// doesn't log the user out.
+function endSession() {
+  localStorage.removeItem(SESSION_KEY)
+  window.dispatchEvent(new Event("ferry:session-expired"))
+}
+
+// Single in-flight refresh shared across concurrent 401s — the backend rotates
+// the refresh token, so parallel refreshes would invalidate each other.
+let refreshInFlight: Promise<string | null> | null = null
+
+async function refreshSession(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    try {
+      const session = getSession()
+      if (!session?.refreshToken) {
+        // No way to recover — end the session so the app routes to login
+        // instead of silently failing every call and showing empty data.
+        endSession()
+        return null
+      }
+      const resp = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+      })
+      if (!resp.ok) {
+        if (resp.status === 401) endSession() // refresh token dead
+        return null // 5xx/transient → keep the session, let the caller retry later
+      }
+      const data = (await resp.json()) as {
+        accessToken: string
+        refreshToken: string
+      }
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          ...getSession(),
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken,
+        }),
+      )
+      return data.accessToken
+    } catch {
+      return null
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+  return refreshInFlight
+}
+
+// tokenExpired decodes the JWT exp claim (with a 30s skew) without a network
+// call, so callers can refresh proactively before using a token.
+function tokenExpired(token: string): boolean {
   try {
-    const raw = localStorage.getItem("ferry.session")
-    if (!raw) return ""
-    return JSON.parse(raw).accessToken ?? ""
+    const payload = JSON.parse(atob(token.split(".")[1])) as { exp?: number }
+    if (!payload.exp) return false
+    return Date.now() >= payload.exp * 1000 - 30_000
   } catch {
-    return ""
+    return true
   }
+}
+
+/**
+ * Returns a currently-valid access token, refreshing first if the stored one is
+ * expired. Used where we can't rely on a 401 round-trip to trigger refresh —
+ * notably the SSE stream URL, which carries the token as a query param.
+ */
+export async function ensureFreshToken(): Promise<string> {
+  const token = getStoredToken()
+  if (token && !tokenExpired(token)) return token
+  const fresh = await refreshSession()
+  return fresh ?? token
+}
+
+/**
+ * fetch wrapper for authenticated API calls: attaches the current access token
+ * and, on a 401, transparently refreshes it once and retries. This is what
+ * prevents the "can't reach repository" error after the 15-minute access token
+ * expires while idling on a screen.
+ */
+async function authedFetch(
+  path: string,
+  init: RequestInit = {},
+  fallbackToken?: string,
+): Promise<Response> {
+  const doFetch = (t: string) =>
+    fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        ...(init.headers ?? {}),
+        ...(t ? { Authorization: `Bearer ${t}` } : {}),
+      },
+    })
+  let resp = await doFetch(getStoredToken() || fallbackToken || "")
+  if (resp.status === 401) {
+    const fresh = await refreshSession()
+    if (fresh) resp = await doFetch(fresh)
+  }
+  return resp
 }
 
 export async function fetchRecentRuns(): Promise<RecentRunSummary[]> {
   if (USE_DUMMY_DATA) return RECENT_RUNS
-
-  const token = getStoredToken()
-  if (!token) return []
   try {
-    const resp = await fetch(`${API_URL}/api/runs`, {
-      headers: authHeaders(token),
-    })
+    const resp = await authedFetch(`/api/runs`)
     if (!resp.ok) return []
     return (await resp.json()) as RecentRunSummary[]
   } catch {
@@ -41,10 +148,7 @@ export async function fetchRun(id: string): Promise<Run> {
     return run
   }
 
-  const token = getStoredToken()
-  const resp = await fetch(`${API_URL}/api/runs/${id}`, {
-    headers: token ? authHeaders(token) : {},
-  })
+  const resp = await authedFetch(`/api/runs/${id}`)
   if (resp.status === 404) throw new Error(`Run ${id} was not found.`)
   if (!resp.ok) throw new Error(`Failed to fetch run ${id}.`)
   return (await resp.json()) as Run
@@ -65,14 +169,15 @@ export async function createRun(
 ): Promise<CreateRunResult> {
   if (USE_DUMMY_DATA) return { id: "run_7", runNumber: 7 }
 
-  const resp = await fetch(`${API_URL}/api/runs`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(accessToken),
-      "Content-Type": "application/json",
+  const resp = await authedFetch(
+    `/api/runs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo, branch, sourceLanguage, targetLanguage, dbEnabled }),
     },
-    body: JSON.stringify({ repo, branch, sourceLanguage, targetLanguage, dbEnabled }),
-  })
+    accessToken,
+  )
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}))
     throw new Error((err as { error?: string }).error ?? "Failed to create run")
@@ -83,20 +188,14 @@ export async function createRun(
 export async function startRun(accessToken: string, runId: string): Promise<void> {
   if (USE_DUMMY_DATA) return
 
-  const resp = await fetch(`${API_URL}/api/runs/${runId}/start`, {
-    method: "POST",
-    headers: authHeaders(accessToken),
-  })
+  const resp = await authedFetch(`/api/runs/${runId}/start`, { method: "POST" }, accessToken)
   if (!resp.ok) throw new Error("Failed to start run")
 }
 
 export async function cancelRun(accessToken: string, runId: string): Promise<void> {
   if (USE_DUMMY_DATA) return
 
-  const resp = await fetch(`${API_URL}/api/runs/${runId}/cancel`, {
-    method: "POST",
-    headers: authHeaders(accessToken),
-  })
+  const resp = await authedFetch(`/api/runs/${runId}/cancel`, { method: "POST" }, accessToken)
   if (!resp.ok) throw new Error("Failed to cancel run")
 }
 
@@ -106,10 +205,7 @@ export async function rerunRun(
 ): Promise<CreateRunResult> {
   if (USE_DUMMY_DATA) return { id: "run_7", runNumber: 7 }
 
-  const resp = await fetch(`${API_URL}/api/runs/${runId}/rerun`, {
-    method: "POST",
-    headers: authHeaders(accessToken),
-  })
+  const resp = await authedFetch(`/api/runs/${runId}/rerun`, { method: "POST" }, accessToken)
   if (!resp.ok) throw new Error("Failed to rerun")
   return (await resp.json()) as CreateRunResult
 }
@@ -117,10 +213,7 @@ export async function rerunRun(
 export async function approveDbPlan(accessToken: string, runId: string): Promise<void> {
   if (USE_DUMMY_DATA) return
 
-  const resp = await fetch(`${API_URL}/api/runs/${runId}/db-plan/approve`, {
-    method: "POST",
-    headers: authHeaders(accessToken),
-  })
+  const resp = await authedFetch(`/api/runs/${runId}/db-plan/approve`, { method: "POST" }, accessToken)
   if (!resp.ok) throw new Error("Failed to approve DB plan")
 }
 
@@ -133,11 +226,12 @@ export interface ResolvedRepo {
   detectedLabel: string
   risk: MigrationRisk
   languages?: Record<string, number>
+  dbMigration?: { available: boolean; label: string }
 }
 
 export type RepoResolution =
   | { ok: true; repo: ResolvedRepo }
-  | { ok: false; reason: "format" | "access" }
+  | { ok: false; reason: "format" | "access" | "auth" }
 
 export interface MigrationRisk {
   percentage: number
@@ -237,13 +331,13 @@ export async function resolveRepo(
   }
 
   try {
-    const resp = await fetch(
-      `${API_URL}/api/github/repos/resolve?repo=${encodeURIComponent(key)}`,
-      {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
+    const resp = await authedFetch(
+      `/api/github/repos/resolve?repo=${encodeURIComponent(key)}`,
+      { cache: "no-store" },
+      accessToken,
     )
+    // A 401 here means refresh also failed → the session is truly gone.
+    if (resp.status === 401) return { ok: false, reason: "auth" }
     if (resp.status === 404) return { ok: false, reason: "access" }
     if (!resp.ok) return { ok: false, reason: "access" }
     const repo = (await resp.json()) as ResolvedRepo
@@ -259,10 +353,11 @@ export async function fetchRepoSuggestions(
   if (USE_DUMMY_DATA) return DUMMY_REPO_SUGGESTIONS
 
   try {
-    const resp = await fetch(`${API_URL}/api/github/repos/suggestions`, {
-      cache: "no-store",
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    const resp = await authedFetch(
+      `/api/github/repos/suggestions`,
+      { cache: "no-store" },
+      accessToken,
+    )
     if (!resp.ok) throw new Error(`repo suggestions failed: ${resp.status}`)
     const suggestions = (await resp.json()) as Array<string | RepoSuggestion>
     return suggestions.map((suggestion) =>
@@ -302,12 +397,10 @@ export async function fetchAppInstallation(
   if (USE_DUMMY_DATA) return { installed: true, installUrl: "" }
 
   try {
-    const resp = await fetch(
-      `${API_URL}/api/github/app/installation?repo=${encodeURIComponent(repo)}`,
-      {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
+    const resp = await authedFetch(
+      `/api/github/app/installation?repo=${encodeURIComponent(repo)}`,
+      { cache: "no-store" },
+      accessToken,
     )
     if (!resp.ok) return { installed: true, installUrl: "" }
     return (await resp.json()) as AppInstallation

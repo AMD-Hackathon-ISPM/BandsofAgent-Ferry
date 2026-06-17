@@ -153,6 +153,11 @@ func (s *Service) StartFerryBandRoom(ctx context.Context, rc FerryRunContext) (s
 		if a.Key == "router" {
 			continue
 		}
+		// DB migration disabled for this run — leave the DB Migrator out of the
+		// band entirely (the pipeline routes code_generator → test_generator).
+		if a.Key == "db_migration" && !rc.DBMigrationEnabled {
+			continue
+		}
 		if a.ID == "" {
 			return "", fmt.Errorf("missing Band agent id for %q (set BAND_%s_ID)", a.Key, strings.ToUpper(a.Key))
 		}

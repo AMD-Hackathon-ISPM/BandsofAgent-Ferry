@@ -357,6 +357,11 @@ func (w *Worker) resolveNext(output string, rc *band.RunCtx) (string, string) {
 		}
 		log.Printf("[%s] rework budget (%d) exhausted; proceeding to %s", w.info.Key, maxReworks, w.role.next)
 	}
+	// DB migration not requested for this run: skip the DB Migrator entirely.
+	if w.role.next == "db_migration" && !rc.DBEnabled {
+		log.Printf("[%s] DB migration disabled; skipping DB Migrator -> test_generator", w.info.Key)
+		return "test_generator", "please continue."
+	}
 	return w.role.next, "please continue."
 }
 
@@ -376,6 +381,10 @@ func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, run
 	content = band.StripCtx(content)
 
 	var b strings.Builder
+	if runCtx.Src != "" && runCtx.Tgt != "" {
+		fmt.Fprintf(&b, "MIGRATION TARGET LANGUAGE: %s (migrating FROM %s). You MUST write ALL generated code and tests in %s and ONLY %s. This is not a choice: producing %s or any language other than %s is incorrect and the sandbox build will reject it.\n\n",
+			runCtx.Tgt, runCtx.Src, runCtx.Tgt, runCtx.Tgt, runCtx.Src, runCtx.Tgt)
+	}
 	if w.role.needsSource && w.source != nil {
 		if digest := w.source.Digest(ctx, runCtx); digest != "" {
 			b.WriteString("REPOSITORY SOURCE (read this real code before answering):\n\n")

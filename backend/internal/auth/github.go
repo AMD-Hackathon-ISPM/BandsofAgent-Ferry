@@ -85,7 +85,7 @@ func (h *GitHubHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ghUser, err := h.getGitHubUser(r.Context(), ghToken)
+	ghUser, err := h.getGitHubUser(r.Context(), ghToken.AccessToken)
 	if err != nil {
 		http.Redirect(w, r, frontendCallback+"?error=user_fetch_failed", http.StatusTemporaryRedirect)
 		return
@@ -97,8 +97,18 @@ func (h *GitHubHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cache the GitHub access token, plus the refresh token (if the App expires
+	// user tokens) so the backend can re-mint it without forcing re-login. Keys
+	// here MUST match internal/github/usertokens.go.
 	if h.rdb != nil {
-		h.rdb.Set(r.Context(), "github_token:"+result.UserID, ghToken, 8*time.Hour)
+		accessTTL := 30 * 24 * time.Hour
+		if ghToken.ExpiresIn > 0 {
+			accessTTL = time.Duration(ghToken.ExpiresIn) * time.Second
+		}
+		h.rdb.Set(r.Context(), "github_token:"+result.UserID, ghToken.AccessToken, accessTTL)
+		if ghToken.RefreshToken != "" {
+			h.rdb.Set(r.Context(), "github_refresh_token:"+result.UserID, ghToken.RefreshToken, 150*24*time.Hour)
+		}
 	}
 
 	params := url.Values{
@@ -127,7 +137,16 @@ func (h *GitHubHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusTemporaryRedirect)
 }
 
-func (h *GitHubHandler) exchangeCode(ctx context.Context, code string) (string, error) {
+// ghTokenResult carries the credentials returned by the OAuth token exchange.
+// RefreshToken/ExpiresIn are populated only when the GitHub App is configured to
+// expire user authorization tokens; otherwise the access token is long-lived.
+type ghTokenResult struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
+}
+
+func (h *GitHubHandler) exchangeCode(ctx context.Context, code string) (ghTokenResult, error) {
 	body := strings.NewReader(url.Values{
 		"client_id":     {h.cfg.ClientID},
 		"client_secret": {h.cfg.ClientSecret},
@@ -137,33 +156,39 @@ func (h *GitHubHandler) exchangeCode(ctx context.Context, code string) (string, 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://github.com/login/oauth/access_token", body)
 	if err != nil {
-		return "", err
+		return ghTokenResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return ghTokenResult{}, err
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return ghTokenResult{}, err
 	}
 
 	var result struct {
-		AccessToken string `json:"access_token"`
-		Error       string `json:"error"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		Error        string `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", fmt.Errorf("failed to parse token response: %w", err)
+		return ghTokenResult{}, fmt.Errorf("failed to parse token response: %w", err)
 	}
 	if result.Error != "" {
-		return "", fmt.Errorf("github token error: %s", result.Error)
+		return ghTokenResult{}, fmt.Errorf("github token error: %s", result.Error)
 	}
-	return result.AccessToken, nil
+	return ghTokenResult{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}, nil
 }
 
 func (h *GitHubHandler) getGitHubUser(ctx context.Context, token string) (*GitHubUserInfo, error) {

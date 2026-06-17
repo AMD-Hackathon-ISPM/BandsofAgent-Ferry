@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -102,6 +103,7 @@ type runVM struct {
 	StartedAt    *string          `json:"startedAt,omitempty"`
 	CompletedAt  *string          `json:"completedAt,omitempty"`
 	ErrorMessage *string          `json:"errorMessage,omitempty"`
+	DbEnabled    bool             `json:"dbEnabled"`
 	Agents       []agentRuntimeVM `json:"agents"`
 	Messages     []AgentMessageVM `json:"messages"`
 	Artifacts    []artifactVM     `json:"artifacts"`
@@ -325,6 +327,11 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	dbPlan, _ := h.fetchDbPlan(r.Context(), companyID, runID)
 	pr, _ := h.fetchPR(r.Context(), companyID, runID)
 
+	var dbEnabled bool
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT db_migration_enabled FROM migration_runs WHERE company_id = $1 AND id = $2`,
+		companyID, runID).Scan(&dbEnabled)
+
 	status := "pending"
 	if run.Status != nil {
 		status = string(*run.Status)
@@ -347,6 +354,7 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 		StartedAt:    pgTimestampPtr(run.StartedAt),
 		CompletedAt:  pgTimestampPtr(run.CompletedAt),
 		ErrorMessage: run.ErrorMessage,
+		DbEnabled:    dbEnabled,
 		Agents:       buildAgents(messages),
 		Messages:     toMessagesVM(messages),
 		Artifacts:    artifacts,
@@ -398,6 +406,13 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Persist the DB-migration choice on the run (per-run, not per-project).
+	if _, err := h.pool.Exec(r.Context(),
+		`UPDATE migration_runs SET db_migration_enabled = $1 WHERE company_id = $2 AND id = $3`,
+		req.DbEnabled, companyID, run.ID); err != nil {
+		log.Printf("runs: persist db_migration_enabled failed: %v", err)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"id":        run.ID.String(),
 		"runNumber": run.RunNumber,
@@ -432,6 +447,12 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The DB-migration toggle is per-run (set at launch), not per-project.
+	var dbEnabled bool
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT db_migration_enabled FROM migration_runs WHERE company_id = $1 AND id = $2`,
+		companyID, runID).Scan(&dbEnabled)
+
 	rc := band.FerryRunContext{
 		CompanyID:          companyID.String(),
 		ProjectID:          existing.ProjectID.String(),
@@ -440,7 +461,7 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 		Branch:             strPtr(existing.TargetBranch),
 		SourceLanguage:     string(project.SourceLanguage),
 		TargetLanguage:     string(project.TargetLanguage),
-		DBMigrationEnabled: project.EnableDbMigration != nil && *project.EnableDbMigration,
+		DBMigrationEnabled: dbEnabled,
 		User:               existing.CreatedBy.String(),
 	}
 	bandChatID, err := h.band.StartFerryBandRoom(r.Context(), rc)
@@ -525,6 +546,15 @@ func (h *Handler) RerunRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create rerun")
 		return
+	}
+
+	// Carry the original run's DB-migration choice over to the rerun.
+	if _, err := h.pool.Exec(r.Context(),
+		`UPDATE migration_runs SET db_migration_enabled =
+		   (SELECT db_migration_enabled FROM migration_runs WHERE company_id = $1 AND id = $2)
+		 WHERE company_id = $1 AND id = $3`,
+		companyID, runID, newRun.ID); err != nil {
+		log.Printf("runs: carry db_migration_enabled to rerun failed: %v", err)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{

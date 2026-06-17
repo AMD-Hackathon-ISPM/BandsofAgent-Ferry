@@ -132,6 +132,69 @@ func (c *Client) FetchSourceDigest(ctx context.Context, owner, repo, branch, sou
 	return b.String(), nil
 }
 
+// DBMigrationInfo reports whether a repo has a MyISAM schema eligible for the
+// MyISAM → InnoDB database migration.
+type DBMigrationInfo struct {
+	Available bool   `json:"available"`
+	Label     string `json:"label"`
+}
+
+const maxSQLFilesScanned = 12
+
+// DetectDBMigration scans the repo's .sql files for MyISAM table definitions.
+// It's best-effort: any fetch failure just yields "not available" rather than
+// erroring the whole repo resolution.
+func (c *Client) DetectDBMigration(ctx context.Context, owner, repo, branch string) DBMigrationInfo {
+	none := DBMigrationInfo{Available: false, Label: "No MyISAM database schema detected"}
+	if branch == "" {
+		b, err := c.defaultBranch(ctx, owner, repo)
+		if err != nil {
+			return none
+		}
+		branch = b
+	}
+
+	body, status, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, branch))
+	if err != nil || status != 200 {
+		return none
+	}
+	var tree ghTree
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return none
+	}
+
+	type sqlFile struct {
+		path string
+		sha  string
+	}
+	var sqlFiles []sqlFile
+	for _, e := range tree.Tree {
+		if e.Type == "blob" && e.Size > 0 && e.Size <= maxFileBytes &&
+			strings.HasSuffix(strings.ToLower(e.Path), ".sql") {
+			sqlFiles = append(sqlFiles, sqlFile{e.Path, e.SHA})
+		}
+	}
+	if len(sqlFiles) == 0 {
+		return DBMigrationInfo{Available: false, Label: "No SQL schema found in this repository"}
+	}
+
+	checked := 0
+	for _, f := range sqlFiles {
+		if checked >= maxSQLFilesScanned {
+			break
+		}
+		content, err := c.fetchBlob(ctx, owner, repo, f.sha)
+		if err != nil {
+			continue
+		}
+		checked++
+		if strings.Contains(strings.ToLower(content), "myisam") {
+			return DBMigrationInfo{Available: true, Label: "MyISAM tables detected — eligible for InnoDB migration"}
+		}
+	}
+	return DBMigrationInfo{Available: false, Label: "SQL found, but no MyISAM tables to migrate"}
+}
+
 func (c *Client) defaultBranch(ctx context.Context, owner, repo string) (string, error) {
 	body, status, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, repo))
 	if err != nil {

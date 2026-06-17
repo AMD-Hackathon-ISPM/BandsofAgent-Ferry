@@ -107,6 +107,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     persist(null)
   }, [persist])
 
+  React.useEffect(() => {
+    const onExpired = () => {
+      setSession(null)
+      setStatus("idle")
+      persist(null)
+    }
+    window.addEventListener("ferry:session-expired", onExpired)
+    return () => window.removeEventListener("ferry:session-expired", onExpired)
+  }, [persist])
+
   const setRole = React.useCallback(
     (role: Role) => {
       setSession((prev) => {
