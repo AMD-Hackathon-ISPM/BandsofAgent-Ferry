@@ -28,6 +28,7 @@ export const VOYAGE_STOP_COUNT = AGENT_ORDER.length
 
 const STATUS_STOP: Record<MigrationStatus, number> = {
   pending: 0,
+  queued: 0,
   planning: 0,
   analyzing: 2,
   translating: 3,
@@ -112,7 +113,9 @@ export function deriveVoyage(run: Run): VoyageStatus {
     : deriveStop(run)
   const prReady = run.pr != null
   if (run.status === "completed") return status(8, "arrived", prReady)
-  if (run.status === "pending") return status(stop, "pending", prReady)
+  if (run.status === "pending" || run.status === "queued") {
+    return status(stop, "pending", prReady)
+  }
 
   if (run.status === "failed") return status(stop, "failed", prReady)
   if (run.status === "blocked" || run.status === "needs_rework") {
