@@ -88,7 +88,7 @@ export function TopBar({ className }: { className?: string }) {
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background px-5 sm:px-8 lg:px-10",
+        "sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background px-5 sm:px-8 lg:px-10",
         className,
       )}
     >
