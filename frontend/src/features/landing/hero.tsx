@@ -39,11 +39,6 @@ export function Hero() {
         aria-hidden="true"
         className="hero-readability-scrim absolute inset-0"
       />
-      {/* Anchor the nav edge. */}
-      <div
-        aria-hidden="true"
-        className="hero-nav-fade absolute inset-x-0 top-0 h-48"
-      />
       {/* Full-width horizon fade into the next section. */}
       <div
         aria-hidden="true"

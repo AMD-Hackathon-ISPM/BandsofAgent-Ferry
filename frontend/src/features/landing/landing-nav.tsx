@@ -1,9 +1,7 @@
-import * as React from "react"
 import { Link } from "react-router-dom"
 import { IconDeviceDesktop, IconMoon, IconSun } from "@tabler/icons-react"
 
 import { useAuth } from "@/providers/auth-provider"
-import { cn } from "@/lib/utils"
 import { Logo } from "@/components/brand"
 import { useTheme, type Theme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
@@ -16,12 +14,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { StartMigrationButton } from "./cta"
-
-const SECTIONS = [
-  { href: "#crossing", label: "The crossing" },
-  { href: "#crew", label: "The crew" },
-  { href: "#artifacts", label: "What you get" },
-] as const
 
 const APPEARANCE_OPTIONS = [
   { value: "dark", label: "Dark Mode" },
@@ -44,7 +36,8 @@ function AppearanceMenu() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          size="icon-sm"
+          size="icon-lg"
+          className="size-[35px]"
           aria-label="Select appearance"
         >
           <SelectedIcon />
@@ -79,25 +72,10 @@ function AppearanceMenu() {
 
 export function LandingNav() {
   const { user } = useAuth()
-  const [scrolled, setScrolled] = React.useState(false)
-
-  React.useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8)
-    onScroll()
-    window.addEventListener("scroll", onScroll, { passive: true })
-    return () => window.removeEventListener("scroll", onScroll)
-  }, [])
 
   return (
-    <header
-      className={cn(
-        "sticky top-0 z-40 transition-colors duration-300",
-        scrolled
-          ? "border-b border-border bg-background/85 backdrop-blur-md"
-          : "border-b border-transparent bg-transparent",
-      )}
-    >
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+    <header className="absolute inset-x-0 top-0 z-40 border-b border-transparent bg-transparent">
+      <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
         <a
           href="#top"
           className="rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -106,26 +84,14 @@ export function LandingNav() {
           <Logo className="h-[19px]" />
         </a>
 
-        <nav className="hidden items-center gap-7 md:flex" aria-label="Sections">
-          {SECTIONS.map((s) => (
-            <a
-              key={s.href}
-              href={s.href}
-              className="text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
-            >
-              {s.label}
-            </a>
-          ))}
-        </nav>
-
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {!user && (
             <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
               <Link to="/login">Sign in</Link>
             </Button>
           )}
           <AppearanceMenu />
-          <StartMigrationButton size="sm" />
+          <StartMigrationButton size="lg" className="px-3.5" />
         </div>
       </div>
     </header>

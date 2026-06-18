@@ -90,22 +90,46 @@ export function ArtifactsBento() {
                         aria-pressed={selected}
                         className={cn(
                           "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left outline-none transition-colors focus-visible:bg-accent/60",
-                          selected ? "bg-accent/70" : "hover:bg-accent/40",
+                          selected
+                            ? "bg-primary text-primary-foreground focus-visible:bg-primary"
+                            : "hover:bg-accent/40",
                         )}
                       >
-                        <meta.icon className="size-4 shrink-0 text-muted-foreground" />
+                        <meta.icon
+                          className={cn(
+                            "size-4 shrink-0",
+                            selected ? "text-primary-foreground" : "text-muted-foreground",
+                          )}
+                        />
                         <span className="min-w-0 flex-1">
                           <span
                             className={cn(
                               "block truncate font-mono text-[12.5px]",
-                              selected ? "font-medium text-foreground" : "text-foreground/90",
+                              selected ? "font-medium text-primary-foreground" : "text-foreground/90",
                             )}
                           >
                             {a.fileName}
                           </span>
-                          <span className="text-[11px] text-muted-foreground">{meta.label}</span>
+                          <span
+                            className={cn(
+                              "text-[11px]",
+                              selected
+                                ? "text-primary-foreground"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {meta.label}
+                          </span>
                         </span>
-                        <AgentGlyph agent={a.createdBy} size="sm" />
+                        <AgentGlyph
+                          agent={a.createdBy}
+                          size="sm"
+                          className={
+                            selected
+                              ? "!border-primary-foreground/30 !bg-primary-foreground/10 !text-primary-foreground"
+                              : undefined
+                          }
+                        />
                       </button>
                     </li>
                   )

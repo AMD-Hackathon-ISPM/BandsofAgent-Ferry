@@ -187,6 +187,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+  ::selection {
+    background: var(--primary);
+    color: oklch(1 0 0);
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: normal;
@@ -305,17 +309,6 @@
         color-mix(in oklch, var(--background) 18%, transparent) 88%,
         transparent 100%
       );
-  }
-
-  .hero-nav-fade {
-    background: linear-gradient(
-      to bottom,
-      var(--background) 0%,
-      color-mix(in oklch, var(--background) 94%, transparent) 24%,
-      color-mix(in oklch, var(--background) 62%, transparent) 58%,
-      color-mix(in oklch, var(--background) 18%, transparent) 82%,
-      transparent 100%
-    );
   }
 
   .hero-bottom-fade {
