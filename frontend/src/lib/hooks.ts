@@ -47,14 +47,32 @@ interface LiveRunState {
   streamedIds: Set<string>
 }
 
+// The SSE live stream and the polled run doc deliver the same backend message with
+// DIFFERENT ids (band message id vs. DB UUID), so id-only dedup misses one copy. Fall
+// back to a content signature to collapse the two.
+function messageSig(m: AgentMessageVM): string {
+  return `${m.agent}|${m.type}|${m.phase}|${m.summary}|${m.createdAt}`
+}
+
 function mergeMessages(
   current: AgentMessageVM[],
   incoming: AgentMessageVM[]
 ): AgentMessageVM[] {
   if (incoming.length === 0) return current
   const byId = new Map(current.map((message) => [message.id, message]))
+  const sigToId = new Map(current.map((message) => [messageSig(message), message.id]))
   for (const message of incoming) {
-    byId.set(message.id, message)
+    const existingId = byId.has(message.id)
+      ? message.id
+      : sigToId.get(messageSig(message))
+    if (existingId !== undefined) {
+      // Same message over a different transport — merge onto the existing entry so its
+      // React key (and any "new" glow keyed off it) stays stable.
+      byId.set(existingId, { ...byId.get(existingId)!, ...message, id: existingId })
+    } else {
+      byId.set(message.id, message)
+      sigToId.set(messageSig(message), message.id)
+    }
   }
   return [...byId.values()].sort((a, b) => {
     const byTime = a.createdAt.localeCompare(b.createdAt)
@@ -111,7 +129,9 @@ export function useLiveRun(run: Run): LiveRunState {
     const handleMessage = (msg: AgentMessageVM) => {
       setStreamedIds((prev) => new Set(prev).add(msg.id))
       setMessages((prev) =>
-        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+        prev.some((m) => m.id === msg.id || messageSig(m) === messageSig(msg))
+          ? prev
+          : [...prev, msg]
       )
       setAgents((prev) =>
         prev.map((a) =>
