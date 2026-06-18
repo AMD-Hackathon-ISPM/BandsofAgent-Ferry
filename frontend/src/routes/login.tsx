@@ -83,7 +83,7 @@ export function Login() {
   const { user, status, beginGitHub } = useAuth()
   const location = useLocation()
   useDocumentTitle("Ferry · Sign In")
-  const from = (location.state as { from?: string } | null)?.from ?? "/"
+  const from = (location.state as { from?: string } | null)?.from ?? "/app"
 
   if (user) return <Navigate to={from} replace />
 

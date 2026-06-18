@@ -288,6 +288,42 @@
     background-size: 44px 44px;
   }
 
+  /* Ordered halftone dither: two offset dot grids. Theme-aware via
+     --foreground; tune density per use with --dither-ink. Pair with a
+     mask-image gradient to fade it across a band (the sensory-ui look). */
+  .bg-dither {
+    --dither-ink: color-mix(in oklch, var(--foreground) 32%, transparent);
+    background-image:
+      radial-gradient(var(--dither-ink) 0.8px, transparent 1.1px),
+      radial-gradient(var(--dither-ink) 0.8px, transparent 1.1px);
+    background-size: 5px 5px;
+    background-position:
+      0 0,
+      2.5px 2.5px;
+  }
+
+  /* Concentric halftone ripple: the dot field, gated into rings emanating from
+     center and cleared in the middle so text sits on calm dark. Accent-tinted
+     to tie the texture to the brand. */
+  .dither-ripple {
+    --dither-ink: color-mix(in oklch, var(--primary-bright) 42%, transparent);
+    background-image:
+      radial-gradient(var(--dither-ink) 0.8px, transparent 1.1px),
+      radial-gradient(var(--dither-ink) 0.8px, transparent 1.1px);
+    background-size: 5px 5px;
+    background-position:
+      0 0,
+      2.5px 2.5px;
+    -webkit-mask-image:
+      radial-gradient(circle at center, transparent 20%, black 72%),
+      repeating-radial-gradient(circle at center, black 0 3px, transparent 3px 13px);
+    mask-image:
+      radial-gradient(circle at center, transparent 20%, black 72%),
+      repeating-radial-gradient(circle at center, black 0 3px, transparent 3px 13px);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+
   .harbor-beacon {
     animation: harbor-beacon 1.6s ease-in-out infinite;
   }

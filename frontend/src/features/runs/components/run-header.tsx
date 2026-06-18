@@ -305,7 +305,7 @@ export function RunHeader({
           className="shrink-0 text-muted-foreground"
           aria-label="Back to runs"
         >
-          <Link to="/">
+          <Link to="/app">
             <IconChevronLeft />
           </Link>
         </Button>

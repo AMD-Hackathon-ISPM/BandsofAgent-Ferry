@@ -59,7 +59,7 @@ export function AuthCallback() {
     }
 
     completeGitHub({ user, accessToken, refreshToken: refreshToken ?? "" })
-    navigate("/", { replace: true })
+    navigate("/app", { replace: true })
     return () => {
       alive = false
     }

@@ -93,7 +93,7 @@ export function TopBar({ className }: { className?: string }) {
       )}
     >
       <div className="flex items-center gap-3">
-        <Link to="/" className="rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        <Link to="/app" className="rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring">
           <Logo />
         </Link>
       </div>

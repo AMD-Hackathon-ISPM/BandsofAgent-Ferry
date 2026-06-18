@@ -40,9 +40,13 @@ export function VoyageView(props: {
   className?: string
   /** Hide the floating ship's log overlay (when it is docked elsewhere). */
   showLog?: boolean
+  /** Hide the bottom phase pipeline (e.g. the hero, where there's no run to track yet). */
+  showProgress?: boolean
   progressClassName?: string
   /** Play the full-screen loading harbor before sailing out. */
   intro?: boolean
+  /** Bias where the ferry rests on open water (fraction of width, 0.5 = center). */
+  seaXFrac?: number
   /** Fires once the ferry has pulled out and reached open water. */
   onDeparted?: () => void
 }) {
@@ -52,8 +56,10 @@ export function VoyageView(props: {
     streamedIds,
     className,
     showLog = true,
+    showProgress = true,
     progressClassName,
     intro = false,
+    seaXFrac,
     onDeparted,
   } = props
   const voyage = useDebugVoyage(deriveVoyage(run))
@@ -74,6 +80,7 @@ export function VoyageView(props: {
     onInspectChange: setInspecting,
     onStageChange: handleStage,
     introDock: intro,
+    seaXFrac,
   })
 
   // Feed the canvas crew sim (positions/interactions are drawn on the cutaway
@@ -125,7 +132,7 @@ export function VoyageView(props: {
       {!intro && voyage.mode === "arrived" && run.pr && (
         <ArrivalPopup run={run} pr={run.pr} />
       )}
-      {!intro && (
+      {!intro && showProgress && (
         <VoyageProgress run={run} className={progressClassName} />
       )}
     </section>

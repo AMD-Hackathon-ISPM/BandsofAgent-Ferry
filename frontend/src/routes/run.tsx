@@ -74,7 +74,7 @@ function RunNotFound() {
           runs.
         </p>
         <Button asChild size="sm" variant="outline">
-          <Link to="/">
+          <Link to="/app">
             <IconArrowLeft data-icon="inline-start" />
             Back to runs
           </Link>

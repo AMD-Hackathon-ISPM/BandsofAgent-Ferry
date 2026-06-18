@@ -58,6 +58,12 @@ export interface SceneState {
   seaEnter: number
   /** Eased ship x as a fraction of the buffer width. */
   shipXFrac: number
+  /**
+   * Where the ship locks on open water, as a fraction of buffer width.
+   * Defaults to SEA_X (dead-center); the hero biases it right so a full-bleed
+   * canvas keeps the ferry clear of the copy column.
+   */
+  seaXFrac: number
   /** Stern loading door, 0 open .. 1 sealed. */
   doorT: number
   t: number
@@ -151,6 +157,7 @@ export function createScene(): SceneState {
     shipV: 0,
     seaEnter: 1,
     shipXFrac: SEA_X,
+    seaXFrac: SEA_X,
     doorT: 1,
     t: 0,
     bufW: 0,
@@ -218,7 +225,7 @@ export function snapStage(s: SceneState, opts?: { forceDock?: boolean }) {
       snapSea(s)
       break
   }
-  s.shipXFrac = SEA_X
+  s.shipXFrac = s.seaXFrac
   s.stageT = 0
 }
 
@@ -242,7 +249,7 @@ function snapDock(s: SceneState) {
   s.seaEnter = 1
   s.doorT = 0
   s.speed = 0
-  s.shipXFrac = SEA_X
+  s.shipXFrac = s.seaXFrac
   s.stageT = 0
 }
 

@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/providers/auth-provider"
 import { QueryProvider } from "@/providers/query-provider"
 import { AppLayout } from "@/components/app-shell"
+import Landing from "@/routes/landing"
 import Home from "@/routes/home"
 import Login from "@/routes/login"
 import AuthCallback from "@/routes/auth-callback"
@@ -19,13 +20,14 @@ const router = createBrowserRouter([
   {
     errorElement: <RouteError />,
     children: [
+      { index: true, element: <Landing /> },
       { path: "/login", element: <Login /> },
       { path: "/auth/callback", element: <AuthCallback /> },
       { path: "/pre-revenue-slide", element: <PreRevenueSlide /> },
       {
         element: <AppLayout />,
         children: [
-          { index: true, element: <Home /> },
+          { path: "app", element: <Home /> },
           { path: "runs/:runId", element: <RunView /> },
         ],
       },

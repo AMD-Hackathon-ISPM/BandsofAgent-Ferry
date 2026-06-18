@@ -41,6 +41,8 @@ export function useVoyageScene(
     onStageChange?: (stage: VoyageStage) => void
     /** Open on the full-screen loading harbor before sailing out. */
     introDock?: boolean
+    /** Override where the ferry locks on open water (fraction of buffer width). */
+    seaXFrac?: number
   } = {}
 ): {
   wrapRef: React.RefObject<HTMLDivElement | null>
@@ -53,7 +55,12 @@ export function useVoyageScene(
   const onInspectChangeRef = React.useRef(options.onInspectChange)
   const onStageChangeRef = React.useRef(options.onStageChange)
   const introDockRef = React.useRef(options.introDock)
+  const seaXFracRef = React.useRef(options.seaXFrac)
   const stillFrameRef = React.useRef<(() => void) | null>(null)
+
+  React.useEffect(() => {
+    seaXFracRef.current = options.seaXFrac
+  }, [options.seaXFrac])
 
   React.useEffect(() => {
     onInspectChangeRef.current = options.onInspectChange
@@ -72,6 +79,7 @@ export function useVoyageScene(
     const harborFerry = bakeFerryAt(HARBOR_ZOOM)
     const scene = createScene()
     scene.voyage = voyageRef.current
+    if (seaXFracRef.current != null) scene.seaXFrac = seaXFracRef.current
     // A fresh launch plays the loading harbor first; otherwise (refresh, or a
     // run already underway) land directly in the stage the status implies.
     // Reduced motion skips the intro entirely.
