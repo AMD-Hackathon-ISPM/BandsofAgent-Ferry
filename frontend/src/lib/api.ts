@@ -1,9 +1,11 @@
 import type { RecentRunSummary, Run } from "@/lib/types"
 import { USE_DUMMY_DATA } from "@/lib/dev-mode"
+import { isLive } from "@/lib/domain"
 import { RECENT_RUNS, getRun } from "@/lib/mock/data"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
 const SESSION_KEY = "ferry.session"
+const dummyArtifactPreviewed = new Set<string>()
 
 interface StoredSession {
   accessToken?: string
@@ -145,6 +147,14 @@ export async function fetchRun(id: string): Promise<Run> {
   if (USE_DUMMY_DATA) {
     const run = getRun(id)
     if (!run) throw new Error(`Run ${id} was not found.`)
+    if (
+      isLive(run.status) &&
+      run.artifacts.length > 0 &&
+      !dummyArtifactPreviewed.has(id)
+    ) {
+      dummyArtifactPreviewed.add(id)
+      return { ...run, artifacts: run.artifacts.slice(0, -1) }
+    }
     return run
   }
 

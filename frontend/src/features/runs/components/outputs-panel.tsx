@@ -5,22 +5,18 @@ import {
   IconChevronRight,
   IconCircleCheck,
   IconClock,
-  IconCode,
   IconExternalLink,
   IconGitBranch,
 } from "@tabler/icons-react"
 
 import {
-  ARTIFACT_GROUP_ORDER,
-  ARTIFACT_TYPES,
   RISK_LABEL,
   RISK_TONE,
   type StatusTone,
 } from "@/lib/domain"
-import { elapsed, formatBytes, formatDuration } from "@/lib/format"
-import type { Artifact, PrStatus, Run } from "@/lib/types"
+import { elapsed, formatDuration } from "@/lib/format"
+import type { PrStatus, Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { AgentGlyph } from "@/features/migrations/components/agent"
 import { Button } from "@/components/ui/button"
 import {
   Collapsible,
@@ -28,12 +24,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { toneDotBg, toneSoft } from "@/features/migrations/components/tone"
-
-// Lazy so Shiki + the Pierre file tree stay out of the initial bundle and load
-// only when a code viewer is first opened.
-const CodeViewerDialog = React.lazy(
-  () => import("@/features/runs/components/code-viewer")
-)
 
 function ToneChip({
   tone,
@@ -302,86 +292,6 @@ function PullRequestCard({ run }: { run: Run }) {
   )
 }
 
-function ArtifactRow({
-  artifact,
-  onOpen,
-}: {
-  artifact: Artifact
-  onOpen: (path: string) => void
-}) {
-  const meta = ARTIFACT_TYPES[artifact.type]
-  const Icon = meta.icon
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(artifact.fileName)}
-      aria-label={`View ${artifact.fileName}`}
-      className="group/row flex w-full items-center gap-2.5 border border-border px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:ring-1 focus-visible:ring-ring"
-    >
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-mono text-[12px] text-foreground">
-          {artifact.fileName}
-        </span>
-        <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <AgentGlyph agent={artifact.createdBy} size="sm" />
-          <span className="tabular">{formatBytes(artifact.sizeBytes)}</span>
-        </span>
-      </span>
-      <IconCode className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100" />
-    </button>
-  )
-}
-
-function ArtifactsSection({
-  run,
-  onOpen,
-}: {
-  run: Run
-  onOpen: (path?: string) => void
-}) {
-  if (run.artifacts.length === 0) {
-    return (
-      <p className="px-1 py-6 text-center text-[12px] text-muted-foreground">
-        No artifacts yet. They appear here as the band produces them.
-      </p>
-    )
-  }
-  return (
-    <OutputDisclosure title="Artifacts" count={run.artifacts.length}>
-      <div className="flex flex-col gap-3">
-        <Button
-          size="sm"
-          variant="outline"
-          className="self-start"
-          onClick={() => onOpen()}
-        >
-          <IconCode data-icon="inline-start" />
-          Browse code
-        </Button>
-        {ARTIFACT_GROUP_ORDER.map((group) => {
-          const items = run.artifacts.filter(
-            (a) => ARTIFACT_TYPES[a.type].group === group
-          )
-          if (items.length === 0) return null
-          return (
-            <div key={group} className="flex flex-col gap-1.5">
-              <span className="text-[10px] tracking-wide text-muted-foreground/70">
-                {group}
-              </span>
-              <div className="flex flex-col gap-1.5">
-                {items.map((a) => (
-                  <ArtifactRow key={a.id} artifact={a} onOpen={onOpen} />
-                ))}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </OutputDisclosure>
-  )
-}
-
 export function OutputsPanel({
   run,
   canApprove,
@@ -397,18 +307,7 @@ export function OutputsPanel({
   className?: string
   showHeader?: boolean
 }) {
-  const empty = !run.dbPlan && !run.pr && run.artifacts.length === 0
-  const [viewerOpen, setViewerOpen] = React.useState(false)
-  const [everOpened, setEverOpened] = React.useState(false)
-  const [requestedPath, setRequestedPath] = React.useState<string | undefined>(
-    undefined
-  )
-
-  const openViewer = (path?: string) => {
-    setRequestedPath(path)
-    setEverOpened(true)
-    setViewerOpen(true)
-  }
+  const empty = !run.dbPlan && !run.pr
 
   return (
     <section
@@ -425,8 +324,7 @@ export function OutputsPanel({
       <div className="flex flex-col gap-4 overflow-y-auto p-3">
         {empty ? (
           <p className="px-1 py-8 text-center text-xs text-muted-foreground">
-            Outputs collect here: generated code, the database plan, and the
-            pull request.
+            Outputs collect here: the database plan and the pull request.
           </p>
         ) : (
           <>
@@ -437,20 +335,9 @@ export function OutputsPanel({
               onApproveDbPlan={onApproveDbPlan}
             />
             {run.pr && <PullRequestCard run={run} />}
-            <ArtifactsSection run={run} onOpen={openViewer} />
           </>
         )}
       </div>
-      {everOpened && (
-        <React.Suspense fallback={null}>
-          <CodeViewerDialog
-            artifacts={run.artifacts}
-            open={viewerOpen}
-            onOpenChange={setViewerOpen}
-            initialPath={requestedPath}
-          />
-        </React.Suspense>
-      )}
     </section>
   )
 }

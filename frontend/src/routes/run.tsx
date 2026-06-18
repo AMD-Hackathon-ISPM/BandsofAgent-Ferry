@@ -7,6 +7,7 @@ import {
   IconArrowLeft,
   IconChevronLeft,
   IconChevronRight,
+  IconCode,
   IconMessages,
   IconReload,
   IconShip,
@@ -20,6 +21,7 @@ import { useAuth } from "@/providers/auth-provider"
 import { cn } from "@/lib/utils"
 import { CrewRoster } from "@/features/voyage/crew-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
+import { CodeViewerBody } from "@/features/runs/components/code-viewer"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { ShipLog } from "@/features/voyage/ship-log"
 import { RunHeader } from "@/features/runs/components/run-header"
@@ -159,12 +161,35 @@ function RunReady({
   const [dbApproved, setDbApproved] = React.useState(
     Boolean(run.dbPlan?.approvedBy)
   )
-  const [centerView, setCenterView] = React.useState<"voyage" | "feed">(
-    "voyage"
+  const [centerView, setCenterView] = React.useState<
+    "voyage" | "feed" | "artifacts"
+  >("voyage")
+  const [viewedArtifactCount, setViewedArtifactCount] = React.useState(
+    run.artifacts.length
   )
   const [leftOpen, setLeftOpen] = React.useState(true)
   const [rightOpen, setRightOpen] = React.useState(true)
   const isXL = useMediaQuery("(min-width: 1280px)")
+  const hasNewArtifacts = run.artifacts.length > viewedArtifactCount
+
+  React.useEffect(() => {
+    if (centerView === "artifacts" || pane === "artifacts") {
+      setViewedArtifactCount(run.artifacts.length)
+    }
+  }, [centerView, pane, run.artifacts.length])
+
+  const showArtifacts = React.useCallback(() => {
+    setViewedArtifactCount(run.artifacts.length)
+    setCenterView("artifacts")
+  }, [run.artifacts.length])
+
+  const handlePaneChange = React.useCallback(
+    (value: string) => {
+      if (value === "artifacts") setViewedArtifactCount(run.artifacts.length)
+      setPane(value)
+    },
+    [run.artifacts.length, setPane]
+  )
 
   // Full-screen loading harbor: shown on every fresh launch (or a genuinely
   // pending run) until the ferry sails out, then the control panels fade in.
@@ -248,6 +273,13 @@ function RunReady({
       className="h-full"
     />
   )
+  const artifacts = run.artifacts.length ? (
+    <CodeViewerBody artifacts={run.artifacts} />
+  ) : (
+    <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+      No artifacts yet. Files appear here as the band produces them.
+    </div>
+  )
   const voyage = (
     <VoyageView
       run={liveRun}
@@ -304,9 +336,6 @@ function RunReady({
           <FolderPanel
             side="right"
             label="Outputs"
-            badge={
-              run.artifacts.length > 0 ? String(run.artifacts.length) : undefined
-            }
             open={rightOpen}
             onOpenChange={setRightOpen}
             className={cn(
@@ -336,11 +365,32 @@ function RunReady({
               onClick={() => setCenterView("feed")}
               icon={<IconMessages className="size-3.5" />}
             >
-              Band room
+              Feed
+            </CenterToggle>
+            <CenterToggle
+              active={centerView === "artifacts"}
+              onClick={showArtifacts}
+              icon={<IconCode className="size-3.5" />}
+            >
+              Artifacts
+              {run.artifacts.length > 0 && (
+                <span
+                  className={cn(
+                    "flex h-4 min-w-4 items-center justify-center px-1 text-[10px] tabular",
+                    hasNewArtifacts
+                      ? "bg-indigo-500 text-white"
+                      : centerView === "artifacts"
+                      ? "bg-background/80 text-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {run.artifacts.length}
+                </span>
+              )}
             </CenterToggle>
           </div>
 
-          {centerView === "feed" && (
+          {(centerView === "feed" || centerView === "artifacts") && (
             <div
               className={cn(
                 "absolute top-14 bottom-3 z-10 overflow-hidden rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-md transition-[left,right] duration-300 ease-in-out",
@@ -348,18 +398,22 @@ function RunReady({
                 rightOpen ? "right-91" : "right-8"
               )}
             >
-              <BandFeed
-                run={liveRun}
-                messages={messages}
-                streamedIds={streamedIds}
-                selectedAgent={selectedAgent}
-                selectedPhase={selectedPhase}
-                onClearFilters={clearFilters}
-                onAction={handleAction}
-                now={now}
-                showHeader={false}
-                className="h-full"
-              />
+              {centerView === "feed" ? (
+                <BandFeed
+                  run={liveRun}
+                  messages={messages}
+                  streamedIds={streamedIds}
+                  selectedAgent={selectedAgent}
+                  selectedPhase={selectedPhase}
+                  onClearFilters={clearFilters}
+                  onAction={handleAction}
+                  now={now}
+                  showHeader={false}
+                  className="h-full"
+                />
+              ) : (
+                artifacts
+              )}
             </div>
           )}
         </div>
@@ -367,7 +421,7 @@ function RunReady({
         <div className="flex min-h-0 flex-1 flex-col">
           <Tabs
             value={pane}
-            onValueChange={setPane}
+            onValueChange={handlePaneChange}
             className="flex min-h-0 flex-1 flex-col gap-0"
           >
             <TabsList
@@ -377,8 +431,9 @@ function RunReady({
               )}
             >
               <TabsTrigger value="voyage">Voyage</TabsTrigger>
-              <TabsTrigger value="feed">Band room</TabsTrigger>
+              <TabsTrigger value="feed">Feed</TabsTrigger>
               <TabsTrigger value="band">Crew</TabsTrigger>
+              <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
               <TabsTrigger value="outputs">Outputs</TabsTrigger>
             </TabsList>
             <TabsContent
@@ -398,6 +453,12 @@ function RunReady({
               className="min-h-0 flex-1 overflow-y-auto border-t border-border"
             >
               {roster}
+            </TabsContent>
+            <TabsContent
+              value="artifacts"
+              className="min-h-0 flex-1 overflow-hidden border-t border-border"
+            >
+              {artifacts}
             </TabsContent>
             <TabsContent
               value="outputs"
