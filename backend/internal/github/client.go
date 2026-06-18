@@ -7,19 +7,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 )
 
 var ErrNotFound = errors.New("repository not found")
 
 type RepoInfo struct {
-	Owner            string         `json:"owner"`
-	Name             string         `json:"name"`
-	DefaultBranch    string         `json:"defaultBranch"`
-	Branches         []string       `json:"branches"`
-	Language         string         `json:"language"`
-	DetectedLanguage string         `json:"detectedLanguage"`
-	DetectedLabel    string         `json:"detectedLabel"`
+	Owner            string          `json:"owner"`
+	Name             string          `json:"name"`
+	DefaultBranch    string          `json:"defaultBranch"`
+	Branches         []string        `json:"branches"`
+	Language         string          `json:"language"`
+	DetectedLanguage string          `json:"detectedLanguage"`
+	DetectedLabel    string          `json:"detectedLabel"`
 	Risk             MigrationRisk   `json:"risk"`
 	Languages        map[string]int  `json:"languages"`
 	DBMigration      DBMigrationInfo `json:"dbMigration"`
@@ -33,10 +34,11 @@ type MigrationRisk struct {
 }
 
 type RepoSuggestion struct {
-	FullName         string        `json:"fullName"`
-	DetectedLanguage string        `json:"detectedLanguage"`
-	DetectedLabel    string        `json:"detectedLabel"`
-	Risk             MigrationRisk `json:"risk"`
+	FullName         string         `json:"fullName"`
+	DetectedLanguage string         `json:"detectedLanguage"`
+	DetectedLabel    string         `json:"detectedLabel"`
+	Risk             MigrationRisk  `json:"risk"`
+	Languages        map[string]int `json:"languages"`
 }
 
 type Client struct {
@@ -78,11 +80,39 @@ type ghRepo struct {
 	} `json:"owner"`
 }
 
+type ghUser struct {
+	Login string `json:"login"`
+}
+
 type ghBranch struct {
 	Name string `json:"name"`
 }
 
+func (c *Client) currentUserLogin(ctx context.Context) (string, error) {
+	body, status, err := c.get(ctx, "/user")
+	if err != nil {
+		return "", err
+	}
+	if status != 200 {
+		return "", fmt.Errorf("github returned status %d", status)
+	}
+
+	var user ghUser
+	if err := json.Unmarshal(body, &user); err != nil {
+		return "", err
+	}
+	return strings.ToLower(user.Login), nil
+}
+
 func (c *Client) ResolveRepo(ctx context.Context, owner, name string) (*RepoInfo, error) {
+	ownerLogin, err := c.currentUserLogin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if strings.ToLower(owner) != ownerLogin {
+		return nil, ErrNotFound
+	}
+
 	body, status, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, name))
 	if err != nil {
 		return nil, fmt.Errorf("github request failed: %w", err)
@@ -140,23 +170,39 @@ func (c *Client) ResolveRepo(ctx context.Context, owner, name string) (*RepoInfo
 		DetectedLanguage: detected,
 		DetectedLabel:    label,
 		Risk:             risk,
-		Languages:        languages,
+		Languages:        languagePercentages(languages),
 		DBMigration:      c.DetectDBMigration(ctx, repo.Owner.Login, repo.Name, repo.DefaultBranch),
 	}, nil
 }
 
 func (c *Client) ListUserRepos(ctx context.Context) ([]RepoSuggestion, error) {
-	body, status, err := c.get(ctx, "/user/repos?per_page=100&sort=updated&affiliation=owner")
+	ownerLogin, err := c.currentUserLogin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if status != 200 {
-		return nil, fmt.Errorf("github returned status %d", status)
-	}
 
 	var repos []ghRepo
-	if err := json.Unmarshal(body, &repos); err != nil {
-		return nil, err
+	for page := 1; ; page++ {
+		body, status, err := c.get(ctx, fmt.Sprintf("/user/repos?per_page=100&page=%d&sort=updated&affiliation=owner", page))
+		if err != nil {
+			return nil, err
+		}
+		if status != 200 {
+			return nil, fmt.Errorf("github returned status %d", status)
+		}
+
+		var batch []ghRepo
+		if err := json.Unmarshal(body, &batch); err != nil {
+			return nil, err
+		}
+		for _, repo := range batch {
+			if strings.ToLower(repo.Owner.Login) == ownerLogin {
+				repos = append(repos, repo)
+			}
+		}
+		if len(batch) < 100 {
+			break
+		}
 	}
 
 	suggestions := make([]RepoSuggestion, len(repos))
@@ -182,14 +228,13 @@ func (c *Client) ListUserRepos(ctx context.Context) ([]RepoSuggestion, error) {
 			risk := calculateMigrationRisk(percentage)
 			if detected == "unsupported" {
 				return
-			} else if !risk.Selectable {
-				risk.Label = fmt.Sprintf("Below 40%% %s language share", label)
 			}
 			suggestions[i] = RepoSuggestion{
 				FullName:         r.FullName,
 				DetectedLanguage: detected,
 				DetectedLabel:    label,
 				Risk:             risk,
+				Languages:        languagePercentages(languages),
 			}
 		}(i, repo)
 	}
@@ -221,6 +266,25 @@ func (c *Client) fetchLanguages(ctx context.Context, owner, name string) (map[st
 		return nil, err
 	}
 	return languages, nil
+}
+
+func languagePercentages(languages map[string]int) map[string]int {
+	total := 0
+	for _, bytes := range languages {
+		total += bytes
+	}
+	if total == 0 {
+		return map[string]int{}
+	}
+
+	percentages := make(map[string]int, len(languages))
+	for language, bytes := range languages {
+		if bytes <= 0 {
+			continue
+		}
+		percentages[language] = int(float64(bytes)/float64(total)*100 + 0.5)
+	}
+	return percentages
 }
 
 func detectRepoLanguage(ghLang string, languages map[string]int) (string, string, int) {
@@ -298,9 +362,9 @@ func calculateMigrationRisk(percentage int) MigrationRisk {
 	default:
 		return MigrationRisk{
 			Percentage: percentage,
-			Level:      "blocked",
-			Label:      "Below migration threshold",
-			Selectable: false,
+			Level:      "low",
+			Label:      "Low probability of success",
+			Selectable: true,
 		}
 	}
 }

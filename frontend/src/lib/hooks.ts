@@ -95,6 +95,7 @@ export function useLiveRun(run: Run): LiveRunState {
         try {
           handleMessage(JSON.parse(event.data) as AgentMessageVM)
         } catch {
+          // Ignore malformed stream events and wait for the next update.
         }
       }
       es.onerror = () => {

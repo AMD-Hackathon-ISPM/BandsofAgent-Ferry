@@ -18,10 +18,19 @@ export function AuthCallback() {
   useDocumentTitle("Ferry · Sign In")
 
   React.useEffect(() => {
+    let alive = true
+    const showError = (nextError: string) => {
+      Promise.resolve().then(() => {
+        if (alive) setError(nextError)
+      })
+    }
+
     const errorParam = params.get("error")
     if (errorParam) {
-      setError(errorParam)
-      return
+      showError(errorParam)
+      return () => {
+        alive = false
+      }
     }
 
     const accessToken = params.get("access_token")
@@ -34,8 +43,10 @@ export function AuthCallback() {
     const role = (params.get("role") as Role) ?? "engineer"
 
     if (!accessToken || !userId) {
-      setError("missing_params")
-      return
+      showError("missing_params")
+      return () => {
+        alive = false
+      }
     }
 
     const user: User = {
@@ -49,6 +60,9 @@ export function AuthCallback() {
 
     completeGitHub({ user, accessToken, refreshToken: refreshToken ?? "" })
     navigate("/", { replace: true })
+    return () => {
+      alive = false
+    }
   }, [params, completeGitHub, navigate])
 
   if (error) {

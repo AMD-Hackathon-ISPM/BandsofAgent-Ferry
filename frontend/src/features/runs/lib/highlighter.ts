@@ -77,10 +77,16 @@ export function useHighlighted(code: string, language: string): string | null {
     let alive = true
     const cached = htmlCache.get(`${resolveLang(language)}::${code}`)
     if (cached) {
-      setHtml(cached)
-      return
+      Promise.resolve().then(() => {
+        if (alive) setHtml(cached)
+      })
+      return () => {
+        alive = false
+      }
     }
-    setHtml(null)
+    Promise.resolve().then(() => {
+      if (alive) setHtml(null)
+    })
     highlightToHtml(code, language)
       .then((result) => {
         if (alive) setHtml(result)

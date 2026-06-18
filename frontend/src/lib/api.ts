@@ -67,7 +67,7 @@ async function refreshSession(): Promise<string | null> {
           ...getSession(),
           accessToken: data.accessToken,
           refreshToken: data.refreshToken,
-        }),
+        })
       )
       return data.accessToken
     } catch {
@@ -112,7 +112,7 @@ export async function ensureFreshToken(): Promise<string> {
 async function authedFetch(
   path: string,
   init: RequestInit = {},
-  fallbackToken?: string,
+  fallbackToken?: string
 ): Promise<Response> {
   const doFetch = (t: string) =>
     fetch(`${API_URL}${path}`, {
@@ -165,7 +165,7 @@ export async function createRun(
   branch: string,
   sourceLanguage: string,
   targetLanguage: string,
-  dbEnabled: boolean,
+  dbEnabled: boolean
 ): Promise<CreateRunResult> {
   if (USE_DUMMY_DATA) return { id: "run_7", runNumber: 7 }
 
@@ -174,9 +174,15 @@ export async function createRun(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo, branch, sourceLanguage, targetLanguage, dbEnabled }),
+      body: JSON.stringify({
+        repo,
+        branch,
+        sourceLanguage,
+        targetLanguage,
+        dbEnabled,
+      }),
     },
-    accessToken,
+    accessToken
   )
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}))
@@ -185,35 +191,60 @@ export async function createRun(
   return (await resp.json()) as CreateRunResult
 }
 
-export async function startRun(accessToken: string, runId: string): Promise<void> {
+export async function startRun(
+  accessToken: string,
+  runId: string
+): Promise<void> {
   if (USE_DUMMY_DATA) return
 
-  const resp = await authedFetch(`/api/runs/${runId}/start`, { method: "POST" }, accessToken)
+  const resp = await authedFetch(
+    `/api/runs/${runId}/start`,
+    { method: "POST" },
+    accessToken
+  )
   if (!resp.ok) throw new Error("Failed to start run")
 }
 
-export async function cancelRun(accessToken: string, runId: string): Promise<void> {
+export async function cancelRun(
+  accessToken: string,
+  runId: string
+): Promise<void> {
   if (USE_DUMMY_DATA) return
 
-  const resp = await authedFetch(`/api/runs/${runId}/cancel`, { method: "POST" }, accessToken)
+  const resp = await authedFetch(
+    `/api/runs/${runId}/cancel`,
+    { method: "POST" },
+    accessToken
+  )
   if (!resp.ok) throw new Error("Failed to cancel run")
 }
 
 export async function rerunRun(
   accessToken: string,
-  runId: string,
+  runId: string
 ): Promise<CreateRunResult> {
   if (USE_DUMMY_DATA) return { id: "run_7", runNumber: 7 }
 
-  const resp = await authedFetch(`/api/runs/${runId}/rerun`, { method: "POST" }, accessToken)
+  const resp = await authedFetch(
+    `/api/runs/${runId}/rerun`,
+    { method: "POST" },
+    accessToken
+  )
   if (!resp.ok) throw new Error("Failed to rerun")
   return (await resp.json()) as CreateRunResult
 }
 
-export async function approveDbPlan(accessToken: string, runId: string): Promise<void> {
+export async function approveDbPlan(
+  accessToken: string,
+  runId: string
+): Promise<void> {
   if (USE_DUMMY_DATA) return
 
-  const resp = await authedFetch(`/api/runs/${runId}/db-plan/approve`, { method: "POST" }, accessToken)
+  const resp = await authedFetch(
+    `/api/runs/${runId}/db-plan/approve`,
+    { method: "POST" },
+    accessToken
+  )
   if (!resp.ok) throw new Error("Failed to approve DB plan")
 }
 
@@ -245,6 +276,7 @@ export interface RepoSuggestion {
   detectedLanguage: ResolvedRepo["detectedLanguage"]
   detectedLabel: string
   risk: MigrationRisk
+  languages?: Record<string, number>
 }
 
 const DUMMY_REPOS: Record<string, ResolvedRepo> = {
@@ -271,12 +303,12 @@ const DUMMY_REPOS: Record<string, ResolvedRepo> = {
     detectedLanguage: "java",
     detectedLabel: "Java",
     risk: {
-      percentage: 74,
+      percentage: 64,
       level: "medium",
       label: "Good migration candidate",
       selectable: true,
     },
-    languages: { Java: 74, SQL: 18, Shell: 8 },
+    languages: { Java: 64, SQL: 18, Go: 10, Shell: 8 },
   },
   "northwind/claims-php": {
     owner: "northwind",
@@ -295,14 +327,15 @@ const DUMMY_REPOS: Record<string, ResolvedRepo> = {
   },
 }
 
-const DUMMY_REPO_SUGGESTIONS: RepoSuggestion[] = Object.entries(DUMMY_REPOS).map(
-  ([fullName, repo]) => ({
-    fullName,
-    detectedLanguage: repo.detectedLanguage,
-    detectedLabel: repo.detectedLabel,
-    risk: repo.risk,
-  }),
-)
+const DUMMY_REPO_SUGGESTIONS: RepoSuggestion[] = Object.entries(
+  DUMMY_REPOS
+).map(([fullName, repo]) => ({
+  fullName,
+  detectedLanguage: repo.detectedLanguage,
+  detectedLabel: repo.detectedLabel,
+  risk: repo.risk,
+  languages: repo.languages,
+}))
 
 function parseRepoInput(input: string): string | null {
   const match = input
@@ -318,14 +351,14 @@ function parseRepoInput(input: string): string | null {
 
 export async function resolveRepo(
   input: string,
-  accessToken: string,
+  accessToken: string
 ): Promise<RepoResolution> {
   const key = parseRepoInput(input)
   if (!key) return { ok: false, reason: "format" }
 
   if (USE_DUMMY_DATA) {
     const repo = Object.entries(DUMMY_REPOS).find(
-      ([fullName]) => fullName.toLowerCase() === key.toLowerCase(),
+      ([fullName]) => fullName.toLowerCase() === key.toLowerCase()
     )?.[1]
     return repo ? { ok: true, repo } : { ok: false, reason: "access" }
   }
@@ -334,7 +367,7 @@ export async function resolveRepo(
     const resp = await authedFetch(
       `/api/github/repos/resolve?repo=${encodeURIComponent(key)}`,
       { cache: "no-store" },
-      accessToken,
+      accessToken
     )
     // A 401 here means refresh also failed → the session is truly gone.
     if (resp.status === 401) return { ok: false, reason: "auth" }
@@ -348,7 +381,7 @@ export async function resolveRepo(
 }
 
 export async function fetchRepoSuggestions(
-  accessToken: string,
+  accessToken: string
 ): Promise<RepoSuggestion[]> {
   if (USE_DUMMY_DATA) return DUMMY_REPO_SUGGESTIONS
 
@@ -356,7 +389,7 @@ export async function fetchRepoSuggestions(
     const resp = await authedFetch(
       `/api/github/repos/suggestions`,
       { cache: "no-store" },
-      accessToken,
+      accessToken
     )
     if (!resp.ok) throw new Error(`repo suggestions failed: ${resp.status}`)
     const suggestions = (await resp.json()) as Array<string | RepoSuggestion>
@@ -373,7 +406,7 @@ export async function fetchRepoSuggestions(
               selectable: true,
             },
           }
-        : suggestion,
+        : suggestion
     )
   } catch {
     return []
@@ -392,7 +425,7 @@ export interface AppInstallation {
  */
 export async function fetchAppInstallation(
   accessToken: string,
-  repo: string,
+  repo: string
 ): Promise<AppInstallation> {
   if (USE_DUMMY_DATA) return { installed: true, installUrl: "" }
 
@@ -400,7 +433,7 @@ export async function fetchAppInstallation(
     const resp = await authedFetch(
       `/api/github/app/installation?repo=${encodeURIComponent(repo)}`,
       { cache: "no-store" },
-      accessToken,
+      accessToken
     )
     if (!resp.ok) return { installed: true, installUrl: "" }
     return (await resp.json()) as AppInstallation

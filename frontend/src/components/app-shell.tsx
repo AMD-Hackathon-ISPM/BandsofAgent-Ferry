@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 import { Logo } from "@/components/brand"
 import { useTheme, type Theme } from "@/components/theme-provider"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -44,8 +44,11 @@ function AccountMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="gap-2 pr-1.5 pl-1">
-          <Avatar className="size-6 rounded-none">
-            <AvatarFallback className="rounded-none bg-secondary text-[10px] font-semibold">
+          <Avatar className="size-6">
+            {user.avatarUrl && (
+              <AvatarImage src={user.avatarUrl} alt={`${user.name} avatar`} />
+            )}
+            <AvatarFallback className="bg-secondary text-[10px] font-semibold">
               {initials(user.name)}
             </AvatarFallback>
           </Avatar>
@@ -85,7 +88,7 @@ export function TopBar({ className }: { className?: string }) {
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background px-3 sm:px-4",
+        "sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background px-5 sm:px-8 lg:px-10",
         className,
       )}
     >

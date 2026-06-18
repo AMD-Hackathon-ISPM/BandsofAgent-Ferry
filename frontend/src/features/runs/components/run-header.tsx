@@ -91,7 +91,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
   React.useEffect(() => {
     if (!live && stopToastId !== null) {
       toast.dismiss(stopToastId)
-      setStopToastId(null)
+      Promise.resolve().then(() => setStopToastId(null))
     }
   }, [live, stopToastId])
 
@@ -143,8 +143,7 @@ function RunActionButton({ run, role }: { run: Run; role: Role }) {
       return
     }
 
-    let toastId: string | number
-    toastId = toast("Stop this run?", {
+    const toastId = toast("Stop this run?", {
       description: "The band will stop after the current step.",
       duration: Infinity,
       action: {

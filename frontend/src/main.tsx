@@ -11,6 +11,7 @@ import Home from "@/routes/home"
 import Login from "@/routes/login"
 import AuthCallback from "@/routes/auth-callback"
 import RunView from "@/routes/run"
+import PreRevenueSlide from "@/routes/pre-revenue-slide"
 import NotFound from "@/routes/not-found"
 import RouteError from "@/routes/route-error"
 
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
     children: [
       { path: "/login", element: <Login /> },
       { path: "/auth/callback", element: <AuthCallback /> },
+      { path: "/pre-revenue-slide", element: <PreRevenueSlide /> },
       {
         element: <AppLayout />,
         children: [
