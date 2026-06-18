@@ -37,17 +37,17 @@ export function Hero() {
           shows below); horizontal on desktop (copy left, open sea right). */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-gradient-to-b from-background via-background/85 to-transparent lg:bg-gradient-to-r lg:via-background/50"
+        className="hero-readability-scrim absolute inset-0"
       />
       {/* Anchor the nav edge. */}
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background to-transparent"
+        className="hero-nav-fade absolute inset-x-0 top-0 h-48"
       />
       {/* Full-width horizon fade into the next section. */}
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background via-background/85 to-transparent"
+        className="hero-bottom-fade absolute inset-x-0 bottom-0 h-72"
       />
 
       <div className="relative mx-auto flex min-h-svh w-full max-w-6xl flex-col justify-center px-4 pt-28 pb-40 sm:px-6 lg:pb-32">
