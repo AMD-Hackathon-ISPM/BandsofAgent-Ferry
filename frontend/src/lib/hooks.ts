@@ -47,6 +47,42 @@ interface LiveRunState {
   streamedIds: Set<string>
 }
 
+function mergeMessages(
+  current: AgentMessageVM[],
+  incoming: AgentMessageVM[]
+): AgentMessageVM[] {
+  if (incoming.length === 0) return current
+  const byId = new Map(current.map((message) => [message.id, message]))
+  for (const message of incoming) {
+    byId.set(message.id, message)
+  }
+  return [...byId.values()].sort((a, b) => {
+    const byTime = a.createdAt.localeCompare(b.createdAt)
+    if (byTime !== 0) return byTime
+    return a.id.localeCompare(b.id)
+  })
+}
+
+function mergeAgents(
+  current: AgentRuntime[],
+  incoming: AgentRuntime[]
+): AgentRuntime[] {
+  if (incoming.length === 0) return current
+  const currentByKey = new Map(current.map((agent) => [agent.key, agent]))
+  return incoming.map((agent) => {
+    const live = currentByKey.get(agent.key)
+    if (!live) return agent
+    return {
+      ...agent,
+      status:
+        live.status === "active" && agent.status !== "blocked"
+          ? live.status
+          : agent.status,
+      currentTask: live.currentTask ?? agent.currentTask,
+      lastActionAt: live.lastActionAt ?? agent.lastActionAt,
+    }
+  })
+}
 
 export function useLiveRun(run: Run): LiveRunState {
   const [messages, setMessages] = React.useState<AgentMessageVM[]>(run.messages)
@@ -54,6 +90,20 @@ export function useLiveRun(run: Run): LiveRunState {
   const [streamedIds, setStreamedIds] = React.useState<Set<string>>(
     () => new Set()
   )
+
+  React.useEffect(() => {
+    setMessages(run.messages)
+    setAgents(run.agents)
+    setStreamedIds(new Set())
+  }, [run.id])
+
+  React.useEffect(() => {
+    setMessages((prev) => mergeMessages(prev, run.messages))
+  }, [run.messages])
+
+  React.useEffect(() => {
+    setAgents((prev) => mergeAgents(prev, run.agents))
+  }, [run.agents])
 
   React.useEffect(() => {
     if (!isLive(run.status)) return

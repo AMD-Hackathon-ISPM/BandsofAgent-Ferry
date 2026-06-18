@@ -200,6 +200,25 @@ func buildAgents(messages []db.AgentMessage) []agentRuntimeVM {
 	return agents
 }
 
+func buildAgentsFromVM(messages []AgentMessageVM) []agentRuntimeVM {
+	lastAction := map[string]string{}
+	for _, m := range messages {
+		if m.CreatedAt != "" {
+			lastAction[m.Agent] = m.CreatedAt
+		}
+	}
+	agents := make([]agentRuntimeVM, len(allAgentKeys))
+	for i, key := range allAgentKeys {
+		a := agentRuntimeVM{Key: key, Status: "idle"}
+		if at, ok := lastAction[key]; ok {
+			a.Status = "done"
+			a.LastActionAt = &at
+		}
+		agents[i] = a
+	}
+	return agents
+}
+
 func toMessagesVM(messages []db.AgentMessage) []AgentMessageVM {
 	out := make([]AgentMessageVM, 0, len(messages))
 	for _, m := range messages {
@@ -222,6 +241,84 @@ func toMessagesVM(messages []db.AgentMessage) []AgentMessageVM {
 			if err := json.Unmarshal(m.Payload, &p); err == nil && len(p) > 0 {
 				vm.Payload = p
 			}
+		}
+		out = append(out, vm)
+	}
+	return out
+}
+
+func transcriptPhaseByKey(key string) string {
+	switch key {
+	case "router":
+		return "planning"
+	case "source_analyzer", "business_logic":
+		return "analysis"
+	case "code_generator":
+		return "translation"
+	case "db_migration":
+		return "db_migration"
+	case "test_generator":
+		return "testing"
+	case "reviewer", "commander":
+		return "review"
+	case "github_connector":
+		return "pr_generation"
+	default:
+		return "planning"
+	}
+}
+
+func transcriptTypeByKey(key string) string {
+	switch key {
+	case "reviewer":
+		return "review"
+	case "commander":
+		return "decision"
+	case "github_connector":
+		return "artifact_created"
+	default:
+		return "handoff"
+	}
+}
+
+func summarizeTranscript(content string) string {
+	s := content
+	for _, tok := range []string{"**", "`", "######", "#####", "####", "###", "##", "#", ">"} {
+		s = strings.ReplaceAll(s, tok, "")
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) > 200 {
+		s = strings.TrimSpace(string(runes[:200])) + "..."
+	}
+	if s == "" {
+		s = "(no content)"
+	}
+	return s
+}
+
+func toTranscriptMessagesVM(messages []band.TranscriptMessage, bandSvc *band.Service) []AgentMessageVM {
+	out := make([]AgentMessageVM, 0, len(messages))
+	for _, m := range messages {
+		agent := bandSvc.AgentKeyByID(m.SenderID)
+		if agent == "" {
+			continue
+		}
+		content := m.Content
+		for _, mention := range m.Metadata.Mentions {
+			content = strings.ReplaceAll(content, "@[["+mention.ID+"]]", "@"+mention.Name)
+		}
+		content = band.StripCtx(content)
+		vm := AgentMessageVM{
+			ID:        m.ID,
+			Agent:     agent,
+			Type:      transcriptTypeByKey(agent),
+			Phase:     transcriptPhaseByKey(agent),
+			Summary:   summarizeTranscript(content),
+			CreatedAt: m.InsertedAt,
+		}
+		if content != "" {
+			vm.Payload = map[string]interface{}{"content": content}
 		}
 		out = append(out, vm)
 	}
@@ -320,6 +417,14 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	messages, _ := h.q.ListAgentMessages(r.Context(), companyID, runID, 500, 0)
+	messageVMs := toMessagesVM(messages)
+	if len(messageVMs) == 0 {
+		if chatID := strPtr(run.BandRoomID); chatID != "" {
+			if transcript, err := h.band.ListTranscriptMessages(r.Context(), chatID); err == nil {
+				messageVMs = toTranscriptMessagesVM(transcript, h.band)
+			}
+		}
+	}
 
 	bandRoomName := ""
 	if room, err := h.q.GetBandRoomByRunID(r.Context(), companyID, runID); err == nil {
@@ -359,10 +464,13 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 		ErrorMessage: run.ErrorMessage,
 		DbEnabled:    dbEnabled,
 		Agents:       buildAgents(messages),
-		Messages:     toMessagesVM(messages),
+		Messages:     messageVMs,
 		Artifacts:    artifacts,
 		DbPlan:       dbPlan,
 		PR:           pr,
+	}
+	if len(messages) == 0 && len(messageVMs) > 0 {
+		vm.Agents = buildAgentsFromVM(messageVMs)
 	}
 
 	writeJSON(w, http.StatusOK, vm)

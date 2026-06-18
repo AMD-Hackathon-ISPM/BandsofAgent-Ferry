@@ -22,10 +22,10 @@ type AgentInfo struct {
 }
 
 type Worker struct {
-	info        AgentInfo
-	role        agentRole
-	client      *band.AgentClient
-	llm         *LLM
+	info   AgentInfo
+	role   agentRole
+	client *band.AgentClient
+	llm    *LLM
 	// resolveLLM returns (baseURL, apiKey, model) for a given target language
 	// and run slot — the slot selects which provider key the run uses.
 	resolveLLM  func(target string, slot int) (string, string, string)
@@ -119,6 +119,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	// pipelines and starves new runs. New runs are delivered via agent_rooms
 	// (room_added -> join + drain) and live WebSocket message_created events.
 	attempt := 0
+	connectedOnce := false
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -152,6 +153,10 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 			go w.drain(ctx, connCtx, chatID)
 		}
+		if connectedOnce {
+			w.backfillMissedRooms(ctx, connCtx, px)
+		}
+		connectedOnce = true
 
 		var dispatchWG sync.WaitGroup
 		dispatchWG.Add(1)
@@ -171,6 +176,33 @@ func (w *Worker) Run(ctx context.Context) error {
 			return waitErr
 		}
 		attempt++
+	}
+}
+
+// backfillMissedRooms re-discovers chats after a reconnect. If the socket was
+// down when Band emitted room_added, the worker would otherwise never learn
+// about the new room and the run would go dark in the UI.
+func (w *Worker) backfillMissedRooms(rootCtx, connCtx context.Context, px *PhoenixClient) {
+	chatIDs, err := w.client.ListChatIDs(connCtx)
+	if err != nil {
+		log.Printf("[%s] list chats after reconnect failed: %v", w.info.Key, err)
+		return
+	}
+
+	discovered := 0
+	for _, chatID := range chatIDs {
+		if !w.markJoined(chatID) {
+			continue
+		}
+		if err := px.Join("chat_room:" + chatID); err != nil {
+			log.Printf("[%s] backfill join chat_room %s failed: %v", w.info.Key, chatID, err)
+			continue
+		}
+		discovered++
+		go w.drain(rootCtx, connCtx, chatID)
+	}
+	if discovered > 0 {
+		log.Printf("[%s] backfilled %d missed chat room(s) after reconnect", w.info.Key, discovered)
 	}
 }
 

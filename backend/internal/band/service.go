@@ -76,6 +76,22 @@ func (s *Service) ListMessages(ctx context.Context, roomID string, filters Messa
 	return s.adapter.ListMessages(ctx, roomID, filters)
 }
 
+func (s *Service) ListTranscriptMessages(ctx context.Context, roomID string) ([]TranscriptMessage, error) {
+	if s.client == nil {
+		return nil, nil
+	}
+	return s.client.ListMessages(ctx, roomID)
+}
+
+func (s *Service) AgentKeyByID(id string) string {
+	for _, a := range s.roster() {
+		if a.ID == id {
+			return a.Key
+		}
+	}
+	return ""
+}
+
 func (s *Service) GetMessage(ctx context.Context, roomID, messageID string) (*AgentMessage, error) {
 	return s.adapter.GetMessage(ctx, roomID, messageID)
 }
