@@ -15,6 +15,7 @@ type runRequest struct {
 	Files      map[string]string `json:"files"`
 	Script     string            `json:"script"`
 	TimeoutSec int               `json:"timeoutSec"`
+	RunID      string            `json:"runId"`
 }
 
 func Execute(ctx context.Context, runnerURL string, spec Spec) (Result, error) {
@@ -22,6 +23,19 @@ func Execute(ctx context.Context, runnerURL string, spec Spec) (Result, error) {
 		return Run(ctx, spec)
 	}
 	return (&Client{URL: runnerURL, http: &http.Client{Timeout: 5 * time.Minute}}).Run(ctx, spec)
+}
+
+// Cleanup tears down a run's persistent workspace container (best-effort),
+// going through the runner when one is configured.
+func Cleanup(ctx context.Context, runnerURL, runID string) {
+	if runID == "" {
+		return
+	}
+	if runnerURL == "" {
+		RemoveWorkspace(ctx, runID)
+		return
+	}
+	(&Client{URL: runnerURL, http: &http.Client{Timeout: 30 * time.Second}}).Cleanup(ctx, runID)
 }
 
 type Client struct {
@@ -35,6 +49,7 @@ func (c *Client) Run(ctx context.Context, spec Spec) (Result, error) {
 		Files:      spec.Files,
 		Script:     spec.Script,
 		TimeoutSec: int(spec.Timeout / time.Second),
+		RunID:      spec.RunID,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+"/run", bytes.NewReader(body))
 	if err != nil {
@@ -58,6 +73,18 @@ func (c *Client) Run(ctx context.Context, spec Spec) (Result, error) {
 	return res, nil
 }
 
+func (c *Client) Cleanup(ctx context.Context, runID string) {
+	body, _ := json.Marshal(runRequest{RunID: runID})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+"/cleanup", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if resp, err := c.http.Do(req); err == nil {
+		resp.Body.Close()
+	}
+}
+
 func Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +101,7 @@ func Handler() http.Handler {
 			Files:   req.Files,
 			Script:  req.Script,
 			Timeout: time.Duration(req.TimeoutSec) * time.Second,
+			RunID:   req.RunID,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -81,6 +109,15 @@ func Handler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
+	})
+	mux.HandleFunc("POST /cleanup", func(w http.ResponseWriter, r *http.Request) {
+		var req runRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		RemoveWorkspace(r.Context(), req.RunID)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
 }

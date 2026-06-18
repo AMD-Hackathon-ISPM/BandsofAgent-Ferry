@@ -36,30 +36,23 @@ func (l *Limiter) acquire(ctx context.Context) error {
 
 func (l *Limiter) release() { <-l.ch }
 
+// LLM is a stateless OpenAI-compatible client; base URL, API key, model and the
+// concurrency limiter are passed per call so one instance serves every agent,
+// run slot (key), and target-specific model.
 type LLM struct {
-	baseURL string
-	apiKey  string
-	model   string
-	http    *http.Client
-	idle    time.Duration
-	limiter *Limiter
+	http *http.Client
+	idle time.Duration
 }
 
-func NewLLM(baseURL, apiKey, model string, limiter *Limiter) *LLM {
+func NewLLM() *LLM {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = 45 * time.Second
 
 	return &LLM{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		apiKey:  apiKey,
-		model:   model,
-		http:    &http.Client{Transport: transport},
-		idle:    90 * time.Second,
-		limiter: limiter,
+		http: &http.Client{Transport: transport},
+		idle: 90 * time.Second,
 	}
 }
-
-func (l *LLM) Configured() bool { return l.apiKey != "" }
 
 type chatMessage struct {
 	Role    string `json:"role"`
@@ -104,16 +97,16 @@ func (r *activityReadCloser) Read(p []byte) (int, error) {
 
 const maxLLMRetries = 5
 
-func (l *LLM) Complete(ctx context.Context, system, user string) (string, error) {
-	if l.limiter != nil {
-		if err := l.limiter.acquire(ctx); err != nil {
+func (l *LLM) Complete(ctx context.Context, baseURL, apiKey, model string, lim *Limiter, system, user string) (string, error) {
+	if lim != nil {
+		if err := lim.acquire(ctx); err != nil {
 			return "", err
 		}
-		defer l.limiter.release()
+		defer lim.release()
 	}
 
 	reqBody := chatCompletionRequest{
-		Model: l.model,
+		Model: model,
 		Messages: []chatMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -126,9 +119,10 @@ func (l *LLM) Complete(ctx context.Context, system, user string) (string, error)
 		return "", fmt.Errorf("marshal: %w", err)
 	}
 
+	base := strings.TrimSuffix(baseURL, "/")
 	var lastErr error
 	for attempt := 0; attempt < maxLLMRetries; attempt++ {
-		text, retryAfter, err := l.do(ctx, raw)
+		text, retryAfter, err := l.do(ctx, base, apiKey, raw)
 		if err == nil {
 			return text, nil
 		}
@@ -146,15 +140,15 @@ func (l *LLM) Complete(ctx context.Context, system, user string) (string, error)
 	return "", fmt.Errorf("exhausted retries: %w", lastErr)
 }
 
-func (l *LLM) do(ctx context.Context, raw []byte) (text string, retryAfter time.Duration, err error) {
+func (l *LLM) do(ctx context.Context, baseURL, apiKey string, raw []byte) (text string, retryAfter time.Duration, err error) {
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, l.baseURL+"/chat/completions", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return "", 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+l.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "text/event-stream, application/json")
 	req.Header.Set("Content-Type", "application/json")
 

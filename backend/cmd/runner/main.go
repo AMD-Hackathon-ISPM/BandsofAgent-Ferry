@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +15,10 @@ func main() {
 	if port == "" {
 		port = "9090"
 	}
+
+	// Clear any workspace containers orphaned by a previous runner run (the
+	// reaper's state is in-memory and doesn't survive a restart).
+	sandbox.SweepWorkspaces(context.Background())
 
 	srv := &http.Server{
 		Addr:              ":" + port,

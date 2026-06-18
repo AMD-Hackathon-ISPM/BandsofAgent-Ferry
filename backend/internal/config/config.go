@@ -133,7 +133,22 @@ type FeatureFlags struct {
 
 type APISourceConfig struct {
 	BaseURL string
-	APIKey  string
+	// APIKeys is the pool of keys for this provider (one per concurrent run
+	// slot). A run pinned to slot i uses APIKeys[i], isolating each concurrent
+	// run's provider rate budget.
+	APIKeys []string
+}
+
+// keyForSlot returns the key for a run slot, wrapping if there are fewer keys
+// than slots (and "" if none configured).
+func (s APISourceConfig) keyForSlot(slot int) string {
+	if len(s.APIKeys) == 0 {
+		return ""
+	}
+	if slot < 0 {
+		slot = 0
+	}
+	return s.APIKeys[slot%len(s.APIKeys)]
 }
 
 type AgentModelConfig struct {
@@ -185,15 +200,17 @@ func (ac *AgentsConfig) agentByKey(agentKey string) AgentModelConfig {
 }
 
 func (ac *AgentsConfig) ForAgent(agentKey string) (baseURL, apiKey, model string) {
-	cfg := ac.agentByKey(agentKey)
-	src, ok := ac.Sources[cfg.Source]
-	if !ok {
-		src = ac.Sources["aimlapi"]
-	}
-	return src.BaseURL, src.APIKey, cfg.Model
+	return ac.ForAgentTargetSlot(agentKey, "", 0)
 }
 
 func (ac *AgentsConfig) ForAgentTarget(agentKey, target string) (baseURL, apiKey, model string) {
+	return ac.ForAgentTargetSlot(agentKey, target, 0)
+}
+
+// ForAgentTargetSlot resolves the (base URL, API key, model) for an agent given
+// the migration target language (code_generator uses a Go/Rust-specific model)
+// and the run's concurrency slot (which selects the key from the provider pool).
+func (ac *AgentsConfig) ForAgentTargetSlot(agentKey, target string, slot int) (baseURL, apiKey, model string) {
 	cfg := ac.agentByKey(agentKey)
 	if agentKey == "code_generator" {
 		switch strings.ToLower(target) {
@@ -211,7 +228,27 @@ func (ac *AgentsConfig) ForAgentTarget(agentKey, target string) (baseURL, apiKey
 	if !ok {
 		src = ac.Sources["aimlapi"]
 	}
-	return src.BaseURL, src.APIKey, cfg.Model
+	return src.BaseURL, src.keyForSlot(slot), cfg.Model
+}
+
+// Slots is the number of concurrent run slots = the size of the smallest
+// configured provider key pool (so every slot has a key in each provider). At
+// least 1.
+func (ac *AgentsConfig) Slots() int {
+	n := -1
+	for _, name := range []string{"aimlapi", "featherless"} {
+		k := len(ac.Sources[name].APIKeys)
+		if k == 0 {
+			continue
+		}
+		if n == -1 || k < n {
+			n = k
+		}
+	}
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 func (ac *AgentsConfig) ModelFor(agentKey string) (model, source string) {
@@ -307,11 +344,11 @@ func Load() (*Config, error) {
 			Sources: map[string]APISourceConfig{
 				"aimlapi": {
 					BaseURL: getEnv("AIMLAPI_BASE_URL", "https://api.aimlapi.com/v1"),
-					APIKey:  getEnv("AIMLAPI_KEY", ""),
+					APIKeys: splitKeys(getEnv("AIMLAPI_KEY", "")),
 				},
 				"featherless": {
 					BaseURL: getEnv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"),
-					APIKey:  getEnv("FEATHERLESS_KEY", ""),
+					APIKeys: splitKeys(getEnv("FEATHERLESS_KEY", "")),
 				},
 			},
 
@@ -414,6 +451,18 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// splitKeys parses a comma-separated key list (e.g. "k1,k2,k3") into a trimmed,
+// non-empty slice — one key per concurrent run slot.
+func splitKeys(raw string) []string {
+	var out []string
+	for _, k := range strings.Split(raw, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // githubAppPrivateKey resolves the GitHub App PEM from either a file path

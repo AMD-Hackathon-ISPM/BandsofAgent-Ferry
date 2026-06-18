@@ -167,6 +167,7 @@ export const PHASE_INDEX: Record<PhaseKey, number> = PHASES.reduce(
 
 export type MigrationStatus =
   | "pending"
+  | "queued"
   | "planning"
   | "analyzing"
   | "translating"
@@ -189,6 +190,7 @@ export interface StatusMeta {
 
 export const STATUS: Record<MigrationStatus, StatusMeta> = {
   pending: { label: "Pending", tone: "idle", phase: null },
+  queued: { label: "Queued", tone: "idle", phase: null },
   planning: { label: "Planning", tone: "live", phase: "planning" },
   analyzing: { label: "Analyzing", tone: "live", phase: "analysis" },
   translating: { label: "Translating", tone: "live", phase: "translation" },

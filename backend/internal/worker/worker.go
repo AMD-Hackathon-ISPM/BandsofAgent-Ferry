@@ -26,7 +26,10 @@ type Worker struct {
 	role        agentRole
 	client      *band.AgentClient
 	llm         *LLM
-	llmByTarget map[string]*LLM
+	// resolveLLM returns (baseURL, apiKey, model) for a given target language
+	// and run slot — the slot selects which provider key the run uses.
+	resolveLLM  func(target string, slot int) (string, string, string)
+	limiters    []*Limiter // one concurrency limiter per slot/key
 	source      *SourceProvider
 	execEnabled bool
 	runnerURL   string
@@ -40,13 +43,14 @@ type Worker struct {
 	handled map[string]bool
 }
 
-func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, llmByTarget map[string]*LLM, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
+func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, resolveLLM func(string, int) (string, string, string), limiters []*Limiter, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
 	return &Worker{
 		info:        info,
 		role:        role,
 		client:      client,
 		llm:         llm,
-		llmByTarget: llmByTarget,
+		resolveLLM:  resolveLLM,
+		limiters:    limiters,
 		source:      source,
 		execEnabled: execEnabled,
 		runnerURL:   runnerURL,
@@ -104,7 +108,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		return fmt.Errorf("[%s] validate key: %w", w.info.Key, err)
 	}
 	w.info.ID = me.ID
-	if !w.llm.Configured() {
+	if _, key, _ := w.resolveLLM("", 0); key == "" {
 		log.Printf("[%s] WARNING: no LLM API key configured - messages will fail until the agent's source key is set", w.info.Key)
 	}
 	log.Printf("[%s] online as %s (%s)", w.info.Key, me.Handle, me.ID)
@@ -299,12 +303,14 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 			execReport = "PULL REQUEST opened: " + url
 			artifact = band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "open", Body: url})
 		}
+		// The PR stage is the run's last code step — reclaim its workspace.
+		w.cleanupWorkspace(ctx, runCtx.Run)
 	}
 
 	prompt := w.buildPrompt(ctx, msg, runCtx, execReport)
 
-	llm := w.selectLLM(runCtx.Tgt)
-	output, err := llm.Complete(ctx, w.role.system, prompt)
+	base, key, model := w.resolveLLM(runCtx.Tgt, runCtx.Slot)
+	output, err := w.llm.Complete(ctx, base, key, model, w.limiterForSlot(runCtx.Slot), w.role.system, prompt)
 	if err != nil {
 		log.Printf("[%s] llm failed: %v", w.info.Key, err)
 		_ = w.client.MarkFailed(ctx, chatID, msg.ID, err.Error())
@@ -424,11 +430,16 @@ func extractRoomID(payload json.RawMessage) string {
 	return ""
 }
 
-func (w *Worker) selectLLM(target string) *LLM {
-	if llm, ok := w.llmByTarget[strings.ToLower(target)]; ok && llm != nil {
-		return llm
+// limiterForSlot returns the concurrency limiter for a run's slot (each slot/key
+// gets its own budget so concurrent runs don't contend on one provider key).
+func (w *Worker) limiterForSlot(slot int) *Limiter {
+	if len(w.limiters) == 0 {
+		return nil
 	}
-	return w.llm
+	if slot < 0 {
+		slot = 0
+	}
+	return w.limiters[slot%len(w.limiters)]
 }
 
 func (w *Worker) reworkNote(attempt, max int, incoming string) string {

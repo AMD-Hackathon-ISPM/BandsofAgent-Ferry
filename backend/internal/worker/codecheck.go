@@ -214,7 +214,10 @@ func (w *Worker) runCodeChecks(ctx context.Context, runID, targetLang, mode stri
 	if !ok {
 		return nil
 	}
-	log.Printf("[%s] code-check: %s of %d generated file(s) in sandbox", w.info.Key, mode, len(files))
+	// Run in the per-run persistent workspace so files + build/module caches
+	// survive across the code → test → review → rework cycle.
+	spec.RunID = runID
+	log.Printf("[%s] code-check: %s of %d generated file(s) in run workspace", w.info.Key, mode, len(files))
 
 	res, err := sandbox.Execute(ctx, w.runnerURL, spec)
 	if err != nil {
@@ -241,6 +244,15 @@ func (w *Worker) runCodeChecks(ctx context.Context, runID, targetLang, mode stri
 		files:   len(files),
 		summary: summarizeSandboxOutput(res.Output),
 	}
+}
+
+// cleanupWorkspace tears down the run's persistent build container once the run
+// is finished (the reaper is the backstop if this is missed).
+func (w *Worker) cleanupWorkspace(ctx context.Context, runID string) {
+	if !w.execEnabled || runID == "" {
+		return
+	}
+	sandbox.Cleanup(ctx, w.runnerURL, runID)
 }
 
 func specFor(targetLang, mode string, files map[string]string) (sandbox.Spec, bool) {

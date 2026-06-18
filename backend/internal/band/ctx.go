@@ -16,13 +16,14 @@ type RunCtx struct {
 	Run       string
 	Rework    int  // how many times the Commander has bounced the run back for rework
 	DBEnabled bool // whether DB migration was requested; when false the DB Migrator is skipped
+	Slot      int  // concurrency slot (0-based) — selects which provider API key this run uses
 }
 
 var ctxRe = regexp.MustCompile(`\[ferry-ctx ([^\]]*)\]`)
 var kvRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 func MarshalCtx(c RunCtx) string {
-	return fmt.Sprintf(`[ferry-ctx repo=%q branch=%q src=%q tgt=%q user=%q run=%q rework="%d" db="%t"]`, c.Repo, c.Branch, c.Src, c.Tgt, c.User, c.Run, c.Rework, c.DBEnabled)
+	return fmt.Sprintf(`[ferry-ctx repo=%q branch=%q src=%q tgt=%q user=%q run=%q rework="%d" db="%t" slot="%d"]`, c.Repo, c.Branch, c.Src, c.Tgt, c.User, c.Run, c.Rework, c.DBEnabled, c.Slot)
 }
 
 func ParseCtx(content string) (RunCtx, bool) {
@@ -49,6 +50,8 @@ func ParseCtx(content string) (RunCtx, bool) {
 			c.Rework, _ = strconv.Atoi(kv[2])
 		case "db":
 			c.DBEnabled = kv[2] == "true"
+		case "slot":
+			c.Slot, _ = strconv.Atoi(kv[2])
 		}
 	}
 	return c, c.Repo != ""

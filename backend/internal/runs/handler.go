@@ -13,6 +13,7 @@ import (
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/db"
 	"github.com/ferry/backend/internal/http/middleware"
+	"github.com/ferry/backend/internal/scheduler"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -26,10 +27,11 @@ type Handler struct {
 	rdb         *redis.Client
 	authService *auth.Service
 	band        *band.Service
+	sched       *scheduler.Scheduler
 }
 
-func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service) *Handler {
-	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc}
+func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service, sched *scheduler.Scheduler) *Handler {
+	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc, sched: sched}
 }
 
 type projectVM struct {
@@ -66,6 +68,7 @@ type artifactVM struct {
 	ID        string  `json:"id"`
 	Type      string  `json:"type"`
 	FileName  string  `json:"fileName"`
+	FilePath  string  `json:"filePath"`
 	SizeBytes int64   `json:"sizeBytes"`
 	CreatedBy string  `json:"createdBy"`
 	Preview   *string `json:"preview,omitempty"`
@@ -441,52 +444,14 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.q.GetProject(r.Context(), companyID, existing.ProjectID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load project")
-		return
+	// Admit through the scheduler: starts now if a concurrency slot is free,
+	// otherwise the run is queued and started when a slot opens.
+	started := h.sched.Admit(r.Context(), runID)
+	status := "queued"
+	if started {
+		status = "planning"
 	}
-
-	// The DB-migration toggle is per-run (set at launch), not per-project.
-	var dbEnabled bool
-	_ = h.pool.QueryRow(r.Context(),
-		`SELECT db_migration_enabled FROM migration_runs WHERE company_id = $1 AND id = $2`,
-		companyID, runID).Scan(&dbEnabled)
-
-	rc := band.FerryRunContext{
-		CompanyID:          companyID.String(),
-		ProjectID:          existing.ProjectID.String(),
-		MigrationRunID:     runID.String(),
-		RepoFullName:       strPtr(project.GithubRepoUrl),
-		Branch:             strPtr(existing.TargetBranch),
-		SourceLanguage:     string(project.SourceLanguage),
-		TargetLanguage:     string(project.TargetLanguage),
-		DBMigrationEnabled: dbEnabled,
-		User:               existing.CreatedBy.String(),
-	}
-	bandChatID, err := h.band.StartFerryBandRoom(r.Context(), rc)
-	if err != nil {
-		failed := db.MigrationStatusFailed
-		msg := "failed to start Band room: " + err.Error()
-		_, _ = h.q.UpdateMigrationRunStatus(r.Context(), companyID, runID, &failed, &msg)
-		writeError(w, http.StatusBadGateway, "failed to start Band collaboration room")
-		return
-	}
-
-	if _, err := h.pool.Exec(r.Context(),
-		`UPDATE migration_runs SET band_room_id = $1, status = 'planning', started_at = NOW()
-		 WHERE company_id = $2 AND id = $3`,
-		bandChatID, companyID, runID,
-	); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start run")
-		return
-	}
-
-	desc := "Ferry migration room for " + strPtr(project.GithubRepoUrl)
-	roomName := rc.RoomName()
-	_, _ = h.q.CreateBandRoom(r.Context(), companyID, runID, bandChatID, roomName, &desc, []byte("{}"))
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "planning", "bandChatId": bandChatID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 func (h *Handler) CancelRun(w http.ResponseWriter, r *http.Request) {
@@ -656,10 +621,10 @@ func (h *Handler) PublishMessage(ctx context.Context, runID string, msg AgentMes
 
 func (h *Handler) fetchArtifacts(ctx context.Context, companyID, runID uuid.UUID) ([]artifactVM, error) {
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, artifact_type, file_name, file_size, COALESCE(generated_by, ''), COALESCE(metadata, '{}')
+		SELECT id, artifact_type, file_name, file_path, file_size, COALESCE(generated_by, ''), COALESCE(metadata, '{}')
 		FROM generated_artifacts
 		WHERE company_id = $1 AND migration_run_id = $2
-		ORDER BY created_at ASC
+		ORDER BY file_path ASC
 	`, companyID, runID)
 	if err != nil {
 		return []artifactVM{}, err
@@ -669,16 +634,17 @@ func (h *Handler) fetchArtifacts(ctx context.Context, companyID, runID uuid.UUID
 	artifacts := make([]artifactVM, 0)
 	for rows.Next() {
 		var id uuid.UUID
-		var artType, fileName, generatedBy string
+		var artType, fileName, filePath, generatedBy string
 		var fileSize int64
 		var metaJSON []byte
-		if err := rows.Scan(&id, &artType, &fileName, &fileSize, &generatedBy, &metaJSON); err != nil {
+		if err := rows.Scan(&id, &artType, &fileName, &filePath, &fileSize, &generatedBy, &metaJSON); err != nil {
 			continue
 		}
 		a := artifactVM{
 			ID:        id.String(),
 			Type:      artType,
 			FileName:  fileName,
+			FilePath:  filePath,
 			SizeBytes: fileSize,
 			CreatedBy: generatedBy,
 		}

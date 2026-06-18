@@ -95,8 +95,12 @@ export function RunView() {
     queryFn: () => fetchRun(runId),
     // While the run is live, poll so artifacts / PR / db-plan appear on their
     // own (messages stream over SSE; these other outputs come from the run doc).
-    refetchInterval: (query) =>
-      query.state.data && isLive(query.state.data.status) ? 4000 : false,
+    // Poll while live (artifacts/PR/db-plan come from the run doc) and while
+    // pending/queued (so the harbor picks up when the scheduler admits the run).
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s && (isLive(s) || s === "queued" || s === "pending") ? 4000 : false
+    },
   })
 
   if (isPending) return <RunSkeleton />
@@ -212,7 +216,9 @@ function RunReady({
     (location.state as { justLaunched?: boolean } | null)?.justLaunched
   )
   const [phase, setPhase] = React.useState<"loading" | "normal">(() =>
-    run.status === "pending" || justLaunched ? "loading" : "normal"
+    run.status === "pending" || run.status === "queued" || justLaunched
+      ? "loading"
+      : "normal"
   )
   const loading = phase === "loading"
   const startedRef = React.useRef(false)
@@ -234,11 +240,13 @@ function RunReady({
   }, [loading, run.status, run.id, accessToken, queryClient])
 
   const introMessage = loading
-    ? run.status === "pending"
-      ? startingRun
-        ? "Dispatching the band — vehicles boarding"
-        : "Queued at harbor — waiting for dispatch"
-      : "Band ready — casting off"
+    ? run.status === "queued"
+      ? "Waiting in queue — all run slots are busy"
+      : run.status === "pending"
+        ? startingRun
+          ? "Dispatching the band — vehicles boarding"
+          : "Queued at harbor — waiting for dispatch"
+        : "Band ready — casting off"
     : undefined
 
   const onDeparted = React.useCallback(() => {

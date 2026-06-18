@@ -11,6 +11,7 @@ import (
 	"github.com/ferry/backend/internal/config"
 	"github.com/ferry/backend/internal/db"
 	"github.com/ferry/backend/internal/http/middleware"
+	"github.com/ferry/backend/internal/scheduler"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,10 +22,11 @@ type Handler struct {
 	q      *db.Queries
 	band   *band.Service
 	agents config.AgentsConfig
+	sched  *scheduler.Scheduler
 }
 
-func NewHandler(pool *pgxpool.Pool, q *db.Queries, bandSvc *band.Service, agents config.AgentsConfig) *Handler {
-	return &Handler{pool: pool, q: q, band: bandSvc, agents: agents}
+func NewHandler(pool *pgxpool.Pool, q *db.Queries, bandSvc *band.Service, agents config.AgentsConfig, sched *scheduler.Scheduler) *Handler {
+	return &Handler{pool: pool, q: q, band: bandSvc, agents: agents, sched: sched}
 }
 
 type createFerryRunRequest struct {
@@ -87,54 +89,23 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc := band.FerryRunContext{
-		CompanyID:          companyID.String(),
-		ProjectID:          projectID.String(),
-		MigrationRunID:     run.ID.String(),
-		RepoFullName:       req.RepoFullName,
-		Branch:             req.Branch,
-		SourceLanguage:     req.SourceLanguage,
-		TargetLanguage:     req.TargetLanguage,
-		DBMigrationEnabled: req.DBMigrationEnabled,
-		DBFileID:           req.DBFileID,
-		User:               userID.String(),
-	}
-	bandChatID, err := h.band.StartFerryBandRoom(ctx, rc)
-	if err != nil {
-
-		failed := db.MigrationStatusFailed
-		msg := "failed to start Band room: " + err.Error()
-		_, _ = h.q.UpdateMigrationRunStatus(ctx, companyID, run.ID, &failed, &msg)
-		log.Printf("ferry: start band room failed: %v", err)
-		writeError(w, http.StatusBadGateway, "failed to start Band collaboration room")
-		return
-	}
-
+	// Persist the per-run DB-migration choice, then admit through the scheduler:
+	// it starts the band now if a concurrency slot is free, else queues the run.
 	if _, err := h.pool.Exec(ctx,
-		`UPDATE migration_runs
-		    SET band_room_id = $1, status = 'planning', started_at = NOW(), db_migration_enabled = $4
-		  WHERE company_id = $2 AND id = $3`,
-		bandChatID, companyID, run.ID, req.DBMigrationEnabled,
+		`UPDATE migration_runs SET db_migration_enabled = $1 WHERE company_id = $2 AND id = $3`,
+		req.DBMigrationEnabled, companyID, run.ID,
 	); err != nil {
-		log.Printf("ferry: persist band room on run failed: %v", err)
+		log.Printf("ferry: persist db_migration_enabled failed: %v", err)
 	}
 
-	metadata, _ := json.Marshal(map[string]interface{}{
-		"repoFullName":       req.RepoFullName,
-		"sourceLanguage":     req.SourceLanguage,
-		"targetLanguage":     req.TargetLanguage,
-		"dbMigrationEnabled": req.DBMigrationEnabled,
-	})
-	desc := "Ferry migration room for " + req.RepoFullName
-	roomName := rc.RoomName()
-	if _, err := h.q.CreateBandRoom(ctx, companyID, run.ID, bandChatID, roomName, &desc, metadata); err != nil {
-		log.Printf("ferry: persist band_rooms record failed: %v", err)
+	status := "queued"
+	if h.sched.Admit(ctx, run.ID) {
+		status = "running"
 	}
 
 	writeJSON(w, http.StatusCreated, createFerryRunResponse{
-		RunID:      run.ID.String(),
-		BandChatID: bandChatID,
-		Status:     "running",
+		RunID:  run.ID.String(),
+		Status: status,
 	})
 }
 

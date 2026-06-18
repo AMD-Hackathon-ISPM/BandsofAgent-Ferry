@@ -24,6 +24,7 @@ import (
 	migratepkg "github.com/ferry/backend/internal/migrate"
 	"github.com/ferry/backend/migrations"
 	runspkg "github.com/ferry/backend/internal/runs"
+	"github.com/ferry/backend/internal/scheduler"
 	"github.com/ferry/backend/internal/storage"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -83,8 +84,14 @@ func main() {
 		log.Fatalf("failed to init band service: %v", err)
 	}
 
-	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService)
-	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents)
+	// Run scheduler: admits up to N concurrent runs (N = provider key-pool size),
+	// queues the rest in Redis, and admits queued runs as slots free.
+	sched := scheduler.New(pool, queries, rdb, bandService, cfg.Agents.Slots(), 0)
+	go sched.Run(context.Background())
+	log.Printf("run scheduler: %d concurrency slot(s)", cfg.Agents.Slots())
+
+	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService, sched)
+	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents, sched)
 
 	// Optional MinIO storage for generated files (best-effort: if it can't be
 	// reached, artifacts still surface via the inline DB preview).

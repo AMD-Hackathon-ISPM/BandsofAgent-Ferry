@@ -55,6 +55,8 @@ export interface Artifact {
   id: string
   type: ArtifactType
   fileName: string
+  /** Full repo-relative path (e.g. "internal/db/db.go"); drives the tree view. */
+  filePath?: string
   sizeBytes: number
   createdBy: AgentKey
   /** Short snippet shown before full content loads. */

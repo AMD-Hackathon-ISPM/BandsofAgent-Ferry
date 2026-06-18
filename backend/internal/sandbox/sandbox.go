@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,9 @@ type Spec struct {
 	Files   map[string]string
 	Script  string
 	Timeout time.Duration
+	// RunID, when set, routes execution to the run's long-lived workspace
+	// container (persistent files + caches) instead of an ephemeral container.
+	RunID string
 }
 
 type Result struct {
@@ -31,6 +33,11 @@ const (
 )
 
 func Run(ctx context.Context, spec Spec) (Result, error) {
+	// A run-scoped spec uses the persistent per-run workspace container.
+	if spec.RunID != "" {
+		return workspaces.exec(ctx, spec)
+	}
+
 	if _, err := exec.LookPath("docker"); err != nil {
 		return Result{}, errors.New("docker not available in this environment")
 	}
@@ -69,26 +76,8 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 		"sh", "-c", script,
 	)
 
-	cmd := exec.CommandContext(runCtx, "docker", args...)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-
-	res := Result{Output: truncate(buf.String())}
-	if runCtx.Err() == context.DeadlineExceeded {
-		res.TimedOut = true
-		return res, nil
-	}
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			res.ExitCode = exitErr.ExitCode()
-			return res, nil
-		}
-		return res, fmt.Errorf("docker run: %w", err)
-	}
-	return res, nil
+	out, err := runDocker(runCtx, args...)
+	return toResult(runCtx, out, err)
 }
 
 func buildScript(files map[string]string, userScript string) string {

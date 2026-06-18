@@ -1,13 +1,21 @@
 import type { Artifact } from "@/lib/types"
 
-/** Paths fed to the Pierre file tree, in artifact order. */
+/** Full repo-relative path for an artifact (falls back to the bare name). */
+export function artifactPath(a: Artifact): string {
+  return a.filePath || a.fileName
+}
+
+/**
+ * Full paths fed to the Pierre file tree — using the repo-relative path (not the
+ * bare filename) is what makes the tree nest by folder instead of rendering flat.
+ */
 export function buildArtifactPaths(artifacts: Artifact[]): string[] {
-  return artifacts.map((a) => a.fileName)
+  return artifacts.map(artifactPath)
 }
 
 /** Resolve a selected tree path back to its artifact. */
 export function artifactByPath(artifacts: Artifact[]): Map<string, Artifact> {
-  return new Map(artifacts.map((a) => [a.fileName, a]))
+  return new Map(artifacts.map((a) => [artifactPath(a), a]))
 }
 
 /** Body to render, preferring full content over the preview snippet. */

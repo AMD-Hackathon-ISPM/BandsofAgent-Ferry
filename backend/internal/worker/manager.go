@@ -29,8 +29,15 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		}
 	}
 
-	limiter := NewLimiter(cfg.Agents.MaxConcurrency)
-	log.Printf("LLM concurrency limit: %d", cfg.Agents.MaxConcurrency)
+	// One limiter per concurrency slot (= per provider key), so concurrent runs
+	// on different keys don't share a single budget.
+	slots := cfg.Agents.Slots()
+	limiters := make([]*Limiter, slots)
+	for i := range limiters {
+		limiters[i] = NewLimiter(cfg.Agents.MaxConcurrency)
+	}
+	llm := NewLLM()
+	log.Printf("run concurrency slots: %d (LLM concurrency/slot: %d)", slots, cfg.Agents.MaxConcurrency)
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Host + ":" + cfg.Redis.Port,
@@ -71,18 +78,13 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 			continue
 		}
 
-		llmBase, llmKey, llmModel := cfg.Agents.ForAgent(a.Key)
 		client := band.NewAgentClient(baseURL, ident.APIKey)
-		llm := NewLLM(llmBase, llmKey, llmModel, limiter)
-		llmByTarget := map[string]*LLM{}
-		if a.Key == "code_generator" {
-			goBase, goKey, goModel := cfg.Agents.ForAgentTarget(a.Key, "go")
-			rustBase, rustKey, rustModel := cfg.Agents.ForAgentTarget(a.Key, "rust")
-			llmByTarget["go"] = NewLLM(goBase, goKey, goModel, limiter)
-			llmByTarget["rust"] = NewLLM(rustBase, rustKey, rustModel, limiter)
+		agentKey := a.Key
+		resolveLLM := func(target string, slot int) (string, string, string) {
+			return cfg.Agents.ForAgentTargetSlot(agentKey, target, slot)
 		}
 
-		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, llmByTarget, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
+		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, resolveLLM, limiters, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
 	}
 
 	if len(workers) == 0 {

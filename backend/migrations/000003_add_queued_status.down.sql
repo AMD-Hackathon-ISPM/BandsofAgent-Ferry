@@ -1,0 +1,1 @@
+-- Postgres can't drop a single enum value; leaving 'queued' in place is harmless.
