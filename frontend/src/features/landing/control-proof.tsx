@@ -35,9 +35,9 @@ const GUARANTEES: { icon: Icon; title: string; body: string }[] = [
 export function ControlProof() {
   return (
     <section className="border-t border-border bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 py-28 sm:px-6 sm:py-36">
+      <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6">
         <Reveal className="max-w-2xl">
-          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] font-semibold tracking-[-0.02em] text-balance">
+          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] pixel-heading text-balance">
             You stay in command of the crossing.
           </h2>
           <p className="mt-5 text-sm leading-relaxed text-muted-foreground sm:text-base">

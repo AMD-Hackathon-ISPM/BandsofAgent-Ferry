@@ -13,9 +13,9 @@ export function LiveDemo() {
 
   return (
     <section id="demo" className="scroll-mt-16 border-t border-border bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 pt-24 pb-14 sm:px-6 sm:pt-32 sm:pb-16">
+      <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6">
         <Reveal className="max-w-2xl">
-          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] font-semibold tracking-[-0.02em] text-balance">
+          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] pixel-heading text-balance">
             Watch a real run, no account needed.
           </h2>
           <p className="mt-5 text-sm leading-relaxed text-muted-foreground sm:text-base">

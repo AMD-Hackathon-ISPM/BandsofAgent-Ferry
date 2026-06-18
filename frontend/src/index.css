@@ -4,6 +4,17 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/jetbrains-mono";
 
+/* Geist Pixel — "Square" variant (each glyph built from solid square pixels), OFL,
+   vercel/geist-pixel-font. Used for landing section headers; ties the marketing
+   page to the product's pixel-art voyage scene. Single weight, render at 400. */
+@font-face {
+  font-family: "Geist Pixel Square";
+  src: url("/fonts/GeistPixel-Square.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -12,6 +23,8 @@
     sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --font-pixel:
+    "Geist Pixel Square", "Geist Variable", ui-sans-serif, system-ui;
 
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -181,6 +194,15 @@
   --agent-review: oklch(0.76 0.12 300);
   --agent-commander: oklch(0.77 0.14 352);
   --agent-github: oklch(0.81 0.12 56);
+}
+
+/* Pixel section headers. The Line face is a single weight, so force 400 (faux-bold
+   smears the stripes) and clear the negative display tracking (pixel cells collide). */
+@utility pixel-heading {
+  font-family: var(--font-pixel);
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  font-feature-settings: normal;
 }
 
 @layer base {
@@ -373,10 +395,18 @@
       2.5px 2.5px;
     -webkit-mask-image:
       radial-gradient(circle at center, transparent 20%, black 72%),
-      repeating-radial-gradient(circle at center, black 0 3px, transparent 3px 13px);
+      repeating-radial-gradient(
+        circle at center,
+        black 0 3px,
+        transparent 3px 13px
+      );
     mask-image:
       radial-gradient(circle at center, transparent 20%, black 72%),
-      repeating-radial-gradient(circle at center, black 0 3px, transparent 3px 13px);
+      repeating-radial-gradient(
+        circle at center,
+        black 0 3px,
+        transparent 3px 13px
+      );
     -webkit-mask-composite: source-in;
     mask-composite: intersect;
   }

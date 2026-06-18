@@ -18,9 +18,9 @@ const PAINS = [
 export function Problem() {
   return (
     <section className="border-t border-border bg-background">
-      <div className="mx-auto grid w-full max-w-6xl gap-x-12 gap-y-10 px-4 py-24 sm:px-6 sm:py-32 lg:grid-cols-[5fr_7fr]">
+      <div className="mx-auto grid w-full max-w-6xl gap-x-12 gap-y-10 px-4 py-24 sm:px-6 lg:grid-cols-[5fr_7fr]">
         <Reveal>
-          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] font-semibold tracking-[-0.02em] text-balance">
+          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] pixel-heading text-balance">
             Modernizing a core system is mostly fear, not typing.
           </h2>
           <p className="mt-5 max-w-md text-sm leading-relaxed text-muted-foreground">

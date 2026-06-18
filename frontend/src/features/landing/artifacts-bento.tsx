@@ -60,9 +60,9 @@ export function ArtifactsBento() {
 
   return (
     <section id="artifacts" className="scroll-mt-16 bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 pt-4 pb-24 sm:px-6 sm:pt-6 sm:pb-32">
+      <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6">
         <Reveal className="max-w-2xl">
-          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] font-semibold tracking-[-0.02em] text-balance">
+          <h2 className="text-[clamp(1.75rem,3.5vw,2.75rem)] leading-[1.05] pixel-heading text-balance">
             What arrives on the other side.
           </h2>
           <p className="mt-5 text-sm leading-relaxed text-muted-foreground sm:text-base">

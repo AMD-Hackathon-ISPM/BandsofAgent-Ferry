@@ -42,7 +42,7 @@ export function Hero() {
       {/* Full-width horizon fade into the next section. */}
       <div
         aria-hidden="true"
-        className="hero-bottom-fade absolute inset-x-0 bottom-0 h-72"
+        className="hero-bottom-fade absolute inset-x-0 bottom-0 h-36"
       />
 
       <div className="relative mx-auto flex min-h-svh w-full max-w-6xl flex-col justify-center px-4 pt-28 pb-40 sm:px-6 lg:pb-32">
@@ -51,7 +51,7 @@ export function Hero() {
             COBOL · Java · PHP&nbsp;&nbsp;→&nbsp;&nbsp;Go · Rust
           </p>
 
-          <h1 className="mt-5 text-[clamp(2.5rem,6vw,5.25rem)] leading-[0.98] font-semibold tracking-[-0.03em] text-balance text-foreground">
+          <h1 className="mt-5 text-[clamp(2.5rem,6vw,5.25rem)] leading-[0.98] pixel-heading text-balance text-foreground">
             Ferry your legacy code to a modern shore.
           </h1>
 

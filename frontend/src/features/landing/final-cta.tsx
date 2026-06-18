@@ -6,7 +6,7 @@ import { StartMigrationButton } from "./cta"
 export function FinalCta() {
   return (
     <section className="border-t border-border bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+      <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6">
         <Reveal>
           <div className="relative isolate overflow-hidden border border-border bg-card/20 px-6 py-24 text-center sm:px-10 sm:py-32">
             {/* Concentric dither ripple, framing the edges, clear in the center. */}
@@ -18,7 +18,7 @@ export function FinalCta() {
             />
 
             <div className="relative mx-auto flex max-w-2xl flex-col items-center">
-              <h2 className="text-[clamp(2rem,4.5vw,3.5rem)] leading-[1.02] font-semibold tracking-[-0.025em] text-balance">
+              <h2 className="text-[clamp(2rem,4.5vw,3.5rem)] leading-[1.02] pixel-heading text-balance">
                 Moor your legacy code at the modern shore.
               </h2>
               <p className="mt-5 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
