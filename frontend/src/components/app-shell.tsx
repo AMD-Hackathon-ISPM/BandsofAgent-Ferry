@@ -1,3 +1,4 @@
+import * as React from "react"
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom"
 import { IconChevronDown, IconLogout } from "@tabler/icons-react"
 
@@ -35,6 +36,23 @@ const APPEARANCE_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: "light", label: "Light Mode" },
   { value: "system", label: "System Default" },
 ]
+
+type AppChrome = {
+  content?: React.ReactNode
+  actions?: React.ReactNode
+  logoLabel?: string
+  logoTo?: string
+}
+
+const AppChromeContext = React.createContext<{
+  setChrome: (chrome: AppChrome | null) => void
+} | null>(null)
+
+export function useAppChrome() {
+  const value = React.useContext(AppChromeContext)
+  if (!value) throw new Error("useAppChrome must be used within AppLayout")
+  return value
+}
 
 function AccountMenu() {
   const { user, signOut } = useAuth()
@@ -84,7 +102,15 @@ function AccountMenu() {
   )
 }
 
-export function TopBar({ className }: { className?: string }) {
+export function TopBar({
+  className,
+  chrome,
+}: {
+  className?: string
+  chrome?: AppChrome | null
+}) {
+  const logoTo = chrome?.logoTo ?? "/app"
+  const logoLabel = chrome?.logoLabel ?? "Ferry home"
   return (
     <header
       className={cn(
@@ -92,12 +118,27 @@ export function TopBar({ className }: { className?: string }) {
         className,
       )}
     >
-      <div className="flex items-center gap-3">
-        <Link to="/app" className="rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring">
+      <div className="flex min-w-0 items-center gap-3">
+        <Link
+          to={logoTo}
+          aria-label={logoLabel}
+          className="shrink-0 rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
           <Logo />
         </Link>
+        {chrome?.content && (
+          <>
+            <span className="shrink-0 font-mono text-sm text-muted-foreground/45">
+              /
+            </span>
+            <div className="min-w-0">{chrome.content}</div>
+          </>
+        )}
       </div>
-      <AccountMenu />
+      <div className="flex shrink-0 items-center gap-3">
+        {chrome?.actions}
+        <AccountMenu />
+      </div>
     </header>
   )
 }
@@ -105,15 +146,18 @@ export function TopBar({ className }: { className?: string }) {
 export function AppLayout() {
   const { user } = useAuth()
   const location = useLocation()
+  const [chrome, setChrome] = React.useState<AppChrome | null>(null)
   useDocumentTitle("Ferry · Migrations")
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
   return (
-    <div className="flex min-h-svh flex-col bg-background">
-      <TopBar />
-      <Outlet />
-      <Toaster position="bottom-right" />
-    </div>
+    <AppChromeContext.Provider value={{ setChrome }}>
+      <div className="flex min-h-svh flex-col bg-background">
+        <TopBar chrome={chrome} />
+        <Outlet />
+        <Toaster position="bottom-right" />
+      </div>
+    </AppChromeContext.Provider>
   )
 }

@@ -37,6 +37,9 @@ export function useVoyageScene(
   options: {
     /** Fires when the ship-inspection mode is entered/left. */
     onInspectChange?: (active: boolean) => void
+    /** Fires when the pointer enters/leaves the clickable ship at open water. */
+    onInteractiveChange?: (hovering: boolean) => void
+    onInspectableChange?: (inspectable: boolean) => void
     /** Fires whenever the spatial stage changes (dock → depart → sea …). */
     onStageChange?: (stage: VoyageStage) => void
     /** Open on the full-screen loading harbor before sailing out. */
@@ -53,6 +56,8 @@ export function useVoyageScene(
   const reduced = usePrefersReducedMotion()
   const voyageRef = React.useRef(voyage)
   const onInspectChangeRef = React.useRef(options.onInspectChange)
+  const onInteractiveChangeRef = React.useRef(options.onInteractiveChange)
+  const onInspectableChangeRef = React.useRef(options.onInspectableChange)
   const onStageChangeRef = React.useRef(options.onStageChange)
   const introDockRef = React.useRef(options.introDock)
   const seaXFracRef = React.useRef(options.seaXFrac)
@@ -64,8 +69,15 @@ export function useVoyageScene(
 
   React.useEffect(() => {
     onInspectChangeRef.current = options.onInspectChange
+    onInteractiveChangeRef.current = options.onInteractiveChange
+    onInspectableChangeRef.current = options.onInspectableChange
     onStageChangeRef.current = options.onStageChange
-  }, [options.onInspectChange, options.onStageChange])
+  }, [
+    options.onInspectChange,
+    options.onInteractiveChange,
+    options.onInspectableChange,
+    options.onStageChange,
+  ])
 
   React.useEffect(() => {
     const wrap = wrapRef.current
@@ -117,13 +129,33 @@ export function useVoyageScene(
         onStageChangeRef.current?.(scene.stage)
       }
     }
+    let lastInspectable = false
+    const notifyInspectable = () => {
+      const inspectable = scene.mode === "sea" && canInspect(scene)
+      if (inspectable !== lastInspectable) {
+        lastInspectable = inspectable
+        onInspectableChangeRef.current?.(inspectable)
+      }
+    }
+    // Pointer-over-ship affordance (the inspect reticle + hover hint). Mirrors
+    // the inspect/stage notifiers: only fires React on edges, not per frame.
+    let lastInteractive = false
+    const setShipHover = (hovering: boolean) => {
+      scene.shipHover = hovering
+      if (hovering !== lastInteractive) {
+        lastInteractive = hovering
+        onInteractiveChangeRef.current?.(hovering)
+      }
+    }
     scene.onShipClick = () => {
+      setShipHover(false) // the ship's leaving the water; drop the hint at once
       enterInspect(scene)
       if (reduced) {
         snapInspect(scene)
         stillFrameRef.current?.()
       }
       notifyInspect()
+      notifyInspectable()
     }
     const leaveInspect = () => {
       exitInspect(scene)
@@ -180,6 +212,7 @@ export function useVoyageScene(
       updateInspect(scene, dt)
       notifyInspect()
       notifyStage()
+      notifyInspectable()
       drawFrame(ctx, scene, sprites, harbor, harborFerry)
     }
     const start = () => {
@@ -210,7 +243,8 @@ export function useVoyageScene(
       const p = toArt(e)
       if (!p) return
       const r = scene.shipRect
-      const onShip = p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
+      const onShip =
+        p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
       if (scene.mode === "inspect") {
         // A real click (not the tail end of a drag) outside the ship puts it
         // back in the water.
@@ -278,6 +312,7 @@ export function useVoyageScene(
       if (scene.mode === "inspect") {
         canvas.style.cursor =
           scene.inspect?.phase === "hold" ? "grab" : "default"
+        setShipHover(false)
         return
       }
       const p = toArt(e)
@@ -285,15 +320,22 @@ export function useVoyageScene(
       const r = scene.shipRect
       const interactive =
         canInspect(scene) &&
-        p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
+        p.x >= r.x &&
+        p.x < r.x + r.w &&
+        p.y >= r.y &&
+        p.y < r.y + r.h
       canvas.style.cursor = interactive ? "pointer" : "default"
+      setShipHover(interactive)
+    }
+    const onCanvasLeave = () => {
+      setShipHover(false)
+      canvas.style.cursor = "default"
     }
 
     const onKeyDown = (e: KeyboardEvent) => {
-      // Space casts off from the loading dock — skips the dwell/readiness
-      // gates and sails out. Works every time the dock is shown (the flag
-      // resets on re-berth); ignored while typing in a field.
-      if (e.key === " " || e.code === "Space") {
+      // Dev-only Space cast-off skips dwell/readiness gates for scene testing;
+      // production waits for the run to become live.
+      if (import.meta.env.DEV && (e.key === " " || e.code === "Space")) {
         const t = e.target as HTMLElement | null
         const typing =
           t &&
@@ -344,6 +386,7 @@ export function useVoyageScene(
       snapStage(scene) // no animation loop to play transitions — jump there
       updateScene(scene, 0)
       notifyStage()
+      notifyInspectable()
       drawFrame(ctx, scene, sprites, harbor, harborFerry)
     }
 
@@ -354,6 +397,7 @@ export function useVoyageScene(
     canvas.addEventListener("click", onClick)
     canvas.addEventListener("mousedown", onMouseDown)
     canvas.addEventListener("mousemove", onCanvasHover)
+    canvas.addEventListener("mouseleave", onCanvasLeave)
     canvas.addEventListener("wheel", onWheel, { passive: false })
     window.addEventListener("mousemove", onMouseMove)
     window.addEventListener("mouseup", onMouseUp)
@@ -370,6 +414,7 @@ export function useVoyageScene(
       canvas.removeEventListener("click", onClick)
       canvas.removeEventListener("mousedown", onMouseDown)
       canvas.removeEventListener("mousemove", onCanvasHover)
+      canvas.removeEventListener("mouseleave", onCanvasLeave)
       canvas.removeEventListener("wheel", onWheel)
       window.removeEventListener("mousemove", onMouseMove)
       window.removeEventListener("mouseup", onMouseUp)

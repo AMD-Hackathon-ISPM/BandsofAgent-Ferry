@@ -18,13 +18,14 @@ import type { AgentKey, PhaseKey } from "@/lib/domain"
 import { fetchRun, startRun } from "@/lib/api"
 import { useLiveRun, useMediaQuery, useNow } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
+import { useAppChrome } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
 import { CrewRoster } from "@/features/voyage/crew-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { CodeViewerBody } from "@/features/runs/components/code-viewer"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { ShipLog } from "@/features/voyage/ship-log"
-import { RunHeader } from "@/features/runs/components/run-header"
+import { RunNavActions, RunNavInfo } from "@/features/runs/components/run-header"
 import { VoyageView } from "@/features/voyage/voyage-view"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -32,20 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 function RunSkeleton() {
   return (
-    <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
-      <div className="flex min-h-14 items-center gap-3 border-b border-border px-3 py-2 sm:px-4">
-        <Skeleton className="size-7 shrink-0" />
-        <Skeleton className="h-4 w-48" />
-        <Skeleton className="hidden h-4 w-64 lg:block" />
-        <div className="ml-auto flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            {Array.from({ length: 7 }).map((_, i) => (
-              <Skeleton key={i} className="size-7 shrink-0" />
-            ))}
-          </div>
-          <Skeleton className="h-8 w-28" />
-        </div>
-      </div>
+    <div className="flex h-[calc(100svh-4rem)] flex-col overflow-hidden">
       <div className="grid flex-1 grid-cols-1 xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
         <div className="hidden flex-col gap-3 border-r border-border p-3 xl:flex">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -156,7 +144,10 @@ function RunReady({
   const { accessToken } = useAuth()
   const queryClient = useQueryClient()
   const { messages, agents, streamedIds } = useLiveRun(run)
-  const liveRun = { ...run, agents, messages }
+  const liveRun = React.useMemo(
+    () => ({ ...run, agents, messages }),
+    [run, agents, messages]
+  )
   const userCanApprove = canApprove(role)
   const [dbApproved, setDbApproved] = React.useState(
     Boolean(run.dbPlan?.approvedBy)
@@ -171,6 +162,26 @@ function RunReady({
   const [rightOpen, setRightOpen] = React.useState(true)
   const isXL = useMediaQuery("(min-width: 1280px)")
   const hasNewArtifacts = run.artifacts.length > viewedArtifactCount
+  const { setChrome } = useAppChrome()
+
+  const chromeContent = React.useMemo(
+    () => <RunNavInfo run={liveRun} now={now} />,
+    [liveRun, now]
+  )
+  const chromeActions = React.useMemo(
+    () => <RunNavActions run={liveRun} />,
+    [liveRun]
+  )
+
+  React.useEffect(() => {
+    setChrome({
+      content: chromeContent,
+      actions: chromeActions,
+      logoLabel: "Back to runs",
+      logoTo: "/app",
+    })
+    return () => setChrome(null)
+  }, [setChrome, chromeContent, chromeActions])
 
   React.useEffect(() => {
     if (centerView === "artifacts" || pane === "artifacts") {
@@ -205,33 +216,36 @@ function RunReady({
   )
   const loading = phase === "loading"
   const startedRef = React.useRef(false)
+  const [startingRun, setStartingRun] = React.useState(false)
+  React.useEffect(() => {
+    if (!loading || run.status !== "pending" || startedRef.current) return
+    startedRef.current = true
+    setStartingRun(true)
+    startRun(accessToken ?? "", run.id)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["run", run.id] }))
+      .catch(() => {
+        queryClient.invalidateQueries({ queryKey: ["run", run.id] })
+        setPhase("normal")
+        toast.error("Couldn't start the migration", {
+          description: "Use the Run button to retry, or reload the page.",
+        })
+      })
+      .finally(() => setStartingRun(false))
+  }, [loading, run.status, run.id, accessToken, queryClient])
+
+  const introMessage = loading
+    ? run.status === "pending"
+      ? startingRun
+        ? "Dispatching the band — vehicles boarding"
+        : "Queued at harbor — waiting for dispatch"
+      : "Band ready — casting off"
+    : undefined
+
   const onDeparted = React.useCallback(() => {
     setPhase("normal")
     if (justLaunched)
       navigate(location.pathname, { replace: true, state: null })
-    // The ferry has left the harbor → start the migration automatically; no
-    // separate Run press needed. Guarded so it fires at most once per view.
-    if (run.status === "pending" && !startedRef.current) {
-      startedRef.current = true
-      startRun(accessToken ?? "", run.id)
-        .then(() =>
-          queryClient.invalidateQueries({ queryKey: ["run", run.id] })
-        )
-        .catch(() =>
-          toast.error("Couldn't start the migration", {
-            description: "Use the Run button to retry, or reload the page.",
-          })
-        )
-    }
-  }, [
-    justLaunched,
-    navigate,
-    location.pathname,
-    run.status,
-    run.id,
-    accessToken,
-    queryClient,
-  ])
+  }, [justLaunched, navigate, location.pathname])
 
   const handleAction = React.useCallback(() => {
     setPane("outputs")
@@ -289,12 +303,13 @@ function RunReady({
       onSelectAgent={setSelectedAgent}
       showLog={!isXL}
       intro={loading}
+      introMessage={introMessage}
       onDeparted={onDeparted}
     />
   )
 
   return (
-    <div className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden">
+    <div className="flex h-[calc(100svh-4rem)] flex-col overflow-hidden">
       <div
         className={cn(
           "shrink-0 transition-all duration-700 ease-out",
@@ -303,13 +318,6 @@ function RunReady({
             : "max-h-64 opacity-100"
         )}
       >
-        <RunHeader
-          run={liveRun}
-          role={role}
-          now={now}
-          dbApproved={dbApproved}
-        />
-
         <RunBanner run={liveRun} onAction={handleAction} />
       </div>
 

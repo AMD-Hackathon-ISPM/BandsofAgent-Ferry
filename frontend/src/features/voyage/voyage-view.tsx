@@ -45,6 +45,8 @@ export function VoyageView(props: {
   progressClassName?: string
   /** Play the full-screen loading harbor before sailing out. */
   intro?: boolean
+  introMessage?: string
+  interactive?: boolean
   /** Bias where the ferry rests on open water (fraction of width, 0.5 = center). */
   seaXFrac?: number
   /** Fires once the ferry has pulled out and reached open water. */
@@ -59,11 +61,15 @@ export function VoyageView(props: {
     showProgress = true,
     progressClassName,
     intro = false,
+    introMessage,
+    interactive = true,
     seaXFrac,
     onDeparted,
   } = props
   const voyage = useDebugVoyage(deriveVoyage(run))
   const [inspecting, setInspecting] = React.useState(false)
+  const [shipInspectable, setShipInspectable] = React.useState(false)
+  const [shipPressed, setShipPressed] = React.useState(false)
   const introRef = React.useRef(intro)
   const onDepartedRef = React.useRef(onDeparted)
   React.useEffect(() => {
@@ -76,8 +82,13 @@ export function VoyageView(props: {
       onDepartedRef.current?.()
     }
   }, [])
+  const handleInspectChange = React.useCallback((active: boolean) => {
+    setInspecting(active)
+    if (active) setShipPressed(true)
+  }, [])
   const { wrapRef, canvasRef } = useVoyageScene(voyage, {
-    onInspectChange: setInspecting,
+    onInspectChange: handleInspectChange,
+    onInspectableChange: interactive ? setShipInspectable : undefined,
     onStageChange: handleStage,
     introDock: intro,
     seaXFrac,
@@ -107,21 +118,34 @@ export function VoyageView(props: {
       <div
         aria-hidden={!inspecting}
         className={cn(
-          "pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm transition-opacity duration-300",
+          "pointer-events-none absolute top-16 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm transition-opacity duration-300",
           inspecting ? "opacity-100" : "opacity-0"
         )}
       >
         Drag to pan — scroll to zoom — Esc to return
       </div>
 
+      <div
+        aria-hidden={!interactive || !shipInspectable || shipPressed || inspecting}
+        className={cn(
+          "pointer-events-none absolute top-16 left-1/2 z-10 -translate-x-1/2 rounded-md border border-primary/40 bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-primary shadow-lg backdrop-blur-sm transition-opacity duration-200",
+          interactive && shipInspectable && !shipPressed && !inspecting && !intro
+            ? "opacity-100"
+            : "opacity-0"
+        )}
+      >
+        Click the ferry to look inside
+      </div>
+
       {intro && !inspecting && (
-        <div className="pointer-events-none absolute top-6 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm">
-          Loading the ferry — vehicles boarding, casting off shortly
+        <div className="pointer-events-none absolute top-16 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm">
+          {introMessage ??
+            "Loading the ferry — vehicles boarding, casting off shortly"}
         </div>
       )}
 
       {!intro && voyage.mode === "pending" && !inspecting && (
-        <div className="pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm">
+        <div className="pointer-events-none absolute top-16 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/85 px-3 py-1.5 font-mono text-[10px] tracking-wide text-muted-foreground shadow-lg backdrop-blur-sm">
           In queue — cargo loading, the ferry departs when the run starts
         </div>
       )}
@@ -144,13 +168,7 @@ export function VoyageView(props: {
  * outputs panel keeps the durable PR link; dismissal sticks for the session
  * so polling can't reopen it.
  */
-function ArrivalPopup({
-  run,
-  pr,
-}: {
-  run: Run
-  pr: NonNullable<Run["pr"]>
-}) {
+function ArrivalPopup({ run, pr }: { run: Run; pr: NonNullable<Run["pr"]> }) {
   const storageKey = `ferry-arrival-dismissed-${run.id}`
   const [dismissed, setDismissed] = React.useState(
     () => sessionStorage.getItem(storageKey) === "1"
@@ -197,13 +215,7 @@ function ArrivalPopup({
   )
 }
 
-function VoyageProgress({
-  run,
-  className,
-}: {
-  run: Run
-  className?: string
-}) {
+function VoyageProgress({ run, className }: { run: Run; className?: string }) {
   return (
     <div
       className={cn(

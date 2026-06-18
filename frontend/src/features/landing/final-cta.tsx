@@ -1,7 +1,10 @@
-import { IconLock } from "@tabler/icons-react"
+import { IconBrandGithub, IconLock } from "@tabler/icons-react"
 
+import { Button } from "@/components/ui/button"
 import { Reveal } from "./use-reveal"
 import { StartMigrationButton } from "./cta"
+
+const GITHUB_REPO_URL = "https://github.com/AMD-Hackathon-ISPM/BandsofAgent-Ferry"
 
 export function FinalCta() {
   return (
@@ -26,7 +29,13 @@ export function FinalCta() {
                 to Go or Rust, tests and pull request included.
               </p>
 
-              <div className="mt-9">
+              <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+                <Button asChild variant="outline" size="lg" className="px-4">
+                  <a href={GITHUB_REPO_URL} target="_blank" rel="noreferrer">
+                    <IconBrandGithub data-icon="inline-start" />
+                    View on GitHub
+                  </a>
+                </Button>
                 <StartMigrationButton size="lg" className="px-4" />
               </div>
 

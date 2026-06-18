@@ -81,6 +81,9 @@ export interface SceneState {
   sky: SkyState
   /** Ship blit rect in art px, refreshed by render; used for click hit-tests. */
   shipRect: { x: number; y: number; w: number; h: number }
+  /** Pointer is over the clickable ship at open water (drives the inspect
+   *  reticle's hover state). Set by the canvas hover handler. */
+  shipHover: boolean
   /** Live prop-inspection state while mode === "inspect". */
   inspect: InspectState | null
   /** Currently held pan keys (arrows), maintained by the canvas hook. */
@@ -94,10 +97,9 @@ export interface SceneState {
    */
   ready: boolean
   /**
-   * Space-bar cast-off: skips the dock's dwell/readiness gates and departs
+   * Dev-only cast-off: skips the dock's dwell/readiness gates and departs
    * immediately, and keeps a still-pending run out at sea instead of snapping
-   * it back to the dock. Cleared whenever the scene re-berths, so the skip
-   * works on every visit to the loading dock.
+   * it back to the dock. Cleared whenever the scene re-berths.
    */
   castOff: boolean
   onShipClick?: () => void
@@ -126,7 +128,7 @@ const DEPART_SPEED = 90
 const DEPART_FADE_DUR = 0.6
 /** Empty-ocean beat before the at-sea ferry enters from the bottom-left. */
 const SEA_ENTER_HOLD = 0.7
-const SEA_ENTER_DUR = 2
+const SEA_ENTER_DUR = 1.5
 /** Cross-fade into the destination scene at the start of the arrive stage. */
 const ARRIVE_FADE_DUR = 0.5
 /** Approach slide from off-screen to the destination berth. */
@@ -176,6 +178,7 @@ export function createScene(): SceneState {
     wakeTimer: 0,
     sky: createSky(),
     shipRect: { x: 0, y: 0, w: 0, h: 0 },
+    shipHover: false,
     inspect: null,
     keys: new Set(),
     harbor: createHarborState(),
@@ -374,22 +377,28 @@ export function updateScene(s: SceneState, dt: number) {
   // the at-sea ferry is on stage).
   s.wakeTimer -= dt
   const seaShipShown = s.stage === "sea" && s.seaEnter > 0
+  const seaEntering = s.stage === "sea" && s.seaEnter < 1
+  const wakeSpeed = seaEntering ? Math.max(s.speed, 0.8) : s.speed
   if (
     s.mode === "sea" &&
     seaShipShown &&
-    s.speed > 0.3 &&
+    wakeSpeed > 0.3 &&
     s.wakeTimer <= 0 &&
     s.bufW > 0
   ) {
-    s.wakeTimer = 0.12
+    s.wakeTimer = seaEntering ? 0.06 : 0.12
     const pos = shipBlitPos(s)
-    const n = 1 + (Math.random() < 0.4 ? 1 : 0)
+    const n = seaEntering
+      ? 2 + (Math.random() < 0.5 ? 1 : 0)
+      : 1 + (Math.random() < 0.4 ? 1 : 0)
+    const jitterX = seaEntering ? 16 : 10
+    const jitterY = seaEntering ? 8 : 5
     for (let i = 0; i < n; i++) {
       s.wake.push({
-        x: pos.x + FERRY_STERN.x + (Math.random() * 10 - 5),
-        y: pos.y + FERRY_STERN.y + (Math.random() * 5 - 2),
-        vx: -SEA_VX * s.speed + (Math.random() * 9 - 4.5),
-        vy: SEA_VY * s.speed + (Math.random() * 4.5 - 2.25),
+        x: pos.x + FERRY_STERN.x + (Math.random() * jitterX - jitterX / 2),
+        y: pos.y + FERRY_STERN.y + (Math.random() * jitterY - jitterY / 2),
+        vx: -SEA_VX * wakeSpeed + (Math.random() * 9 - 4.5),
+        vy: SEA_VY * wakeSpeed + (Math.random() * 4.5 - 2.25),
         age: 0,
         life: 1.8 + Math.random() * 1.2,
       })

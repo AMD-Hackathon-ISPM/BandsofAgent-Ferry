@@ -19,6 +19,8 @@ export const COLORS = {
   seaBase: "#15223f",
   shadow: "#0b1428",
   outline: "#0e1730",
+  /** Brand indigo (≈ --primary), for the click-the-ship inspect reticle. */
+  beacon: "#5f7bff",
 }
 
 export interface SpriteDef {

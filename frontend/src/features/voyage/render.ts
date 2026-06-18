@@ -8,8 +8,12 @@
 
 import { drawSea } from "./sea"
 import { drawSkyShadows, drawSkyTops } from "./sky"
-import { shipBlitPos, shipBobOffset, type SceneState } from "./scene"
-import type { Sprites } from "./sprites"
+import {
+  shipBlitPos,
+  shipBobOffset,
+  type SceneState,
+} from "./scene"
+import { type Sprites } from "./sprites"
 import { drawInspect } from "./inspect"
 import {
   drawDestinationBack,

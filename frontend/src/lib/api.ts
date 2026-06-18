@@ -6,6 +6,7 @@ import { RECENT_RUNS, getRun } from "@/lib/mock/data"
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
 const SESSION_KEY = "ferry.session"
 const dummyArtifactPreviewed = new Set<string>()
+const dummyStartedRuns = new Set<string>()
 
 interface StoredSession {
   accessToken?: string
@@ -147,6 +148,34 @@ export async function fetchRun(id: string): Promise<Run> {
   if (USE_DUMMY_DATA) {
     const run = getRun(id)
     if (!run) throw new Error(`Run ${id} was not found.`)
+    if (id === "run_8" && dummyStartedRuns.has(id)) {
+      return {
+        ...run,
+        status: "planning",
+        currentPhase: "planning",
+        startedAt: new Date().toISOString(),
+        agents: run.agents.map((agent) =>
+          agent.key === "router"
+            ? {
+                ...agent,
+                status: "active",
+                currentTask: "Planning migration route",
+                lastActionAt: new Date().toISOString(),
+              }
+            : agent
+        ),
+        messages: [
+          {
+            id: "r8m1",
+            agent: "router",
+            type: "task_request",
+            phase: "planning",
+            summary: "Migration run dispatched. Building the plan.",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }
+    }
     if (
       isLive(run.status) &&
       run.artifacts.length > 0 &&
@@ -177,7 +206,10 @@ export async function createRun(
   targetLanguage: string,
   dbEnabled: boolean
 ): Promise<CreateRunResult> {
-  if (USE_DUMMY_DATA) return { id: "run_7", runNumber: 7 }
+  if (USE_DUMMY_DATA) {
+    dummyStartedRuns.delete("run_8")
+    return { id: "run_8", runNumber: 8 }
+  }
 
   const resp = await authedFetch(
     `/api/runs`,
@@ -205,7 +237,11 @@ export async function startRun(
   accessToken: string,
   runId: string
 ): Promise<void> {
-  if (USE_DUMMY_DATA) return
+  if (USE_DUMMY_DATA) {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    dummyStartedRuns.add(runId)
+    return
+  }
 
   const resp = await authedFetch(
     `/api/runs/${runId}/start`,

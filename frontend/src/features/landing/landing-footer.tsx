@@ -2,7 +2,6 @@ import { Link } from "react-router-dom"
 import { IconArrowUp } from "@tabler/icons-react"
 
 import { Logo } from "@/components/brand"
-import { StartMigrationButton } from "./cta"
 
 type FooterLink = { label: string; href: string; internal?: boolean }
 
@@ -60,9 +59,6 @@ export function LandingFooter() {
               Ferry reads a legacy repository and opens a reviewed pull request in Go or Rust.
               You watch every leg of the crossing.
             </p>
-            <div className="mt-6">
-              <StartMigrationButton size="sm" />
-            </div>
           </div>
 
           <FooterColumn title="Product" links={PRODUCT} />
@@ -71,7 +67,7 @@ export function LandingFooter() {
 
         {/* Baseline */}
         <div className="flex flex-col gap-3 border-t border-border py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Singkong. Legacy code, ferried to a modern shore.</p>
+          <p>© 2026 ferry. Built by Team Singkong</p>
           <a
             href="#top"
             className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"

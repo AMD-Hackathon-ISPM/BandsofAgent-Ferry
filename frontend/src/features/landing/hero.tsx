@@ -29,6 +29,7 @@ export function Hero() {
           streamedIds={EMPTY_IDS}
           showLog={false}
           showProgress={false}
+          interactive={false}
           seaXFrac={isDesktop ? 0.76 : 0.66}
         />
       </div>

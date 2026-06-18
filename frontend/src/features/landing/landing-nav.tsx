@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { IconDeviceDesktop, IconMoon, IconSun } from "@tabler/icons-react"
+import { IconBrandGithub, IconDeviceDesktop, IconMoon, IconSun } from "@tabler/icons-react"
 
 import { useAuth } from "@/providers/auth-provider"
 import { Logo } from "@/components/brand"
@@ -26,6 +26,8 @@ const APPEARANCE_ICON: Record<Theme, typeof IconSun> = {
   light: IconSun,
   system: IconDeviceDesktop,
 }
+
+const GITHUB_REPO_URL = "https://github.com/AMD-Hackathon-ISPM/BandsofAgent-Ferry"
 
 function AppearanceMenu() {
   const { theme, setTheme } = useTheme()
@@ -91,6 +93,17 @@ export function LandingNav() {
             </Button>
           )}
           <AppearanceMenu />
+          <Button
+            asChild
+            variant="outline"
+            size="icon-lg"
+            className="size-[35px]"
+            aria-label="View on GitHub"
+          >
+            <a href={GITHUB_REPO_URL} target="_blank" rel="noreferrer">
+              <IconBrandGithub />
+            </a>
+          </Button>
           <StartMigrationButton size="lg" className="px-3.5" />
         </div>
       </div>

@@ -53,36 +53,6 @@ function CodePreview({ code }: { code: string }) {
   )
 }
 
-function OutputDisclosure({
-  title,
-  count,
-  defaultOpen = true,
-  children,
-}: {
-  title: string
-  count?: number
-  defaultOpen?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <Collapsible
-      defaultOpen={defaultOpen}
-      className="border-b border-border/80 pb-4 last:border-b-0 last:pb-0"
-    >
-      <CollapsibleTrigger className="group/section flex w-full items-center justify-between gap-3 py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring">
-        <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase">
-          {title}
-          {typeof count === "number" && (
-            <span className="tabular text-muted-foreground/80">{count}</span>
-          )}
-        </span>
-        <IconChevronRight className="size-4 text-muted-foreground transition-transform group-data-[state=open]/section:rotate-90" />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pt-3">{children}</CollapsibleContent>
-    </Collapsible>
-  )
-}
-
 function DbPlanCard({
   run,
   canApprove,
@@ -130,8 +100,8 @@ function DbPlanCard({
       <div className="flex flex-col gap-3 p-3">
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
           {plan.requiresDowntime ? (
-            <span className="inline-flex w-full items-center gap-1.5 border border-warning/30 bg-warning/10 px-2 py-2 text-warning">
-              <IconClock className="size-3" />
+            <span className="inline-flex w-full items-center gap-1.5 border border-border bg-background/40 px-2 py-2 text-muted-foreground">
+              <IconClock className="size-3 shrink-0" />
               Requires downtime · ~
               {formatDuration(plan.estimatedSeconds * 1000)}
             </span>
@@ -149,7 +119,7 @@ function DbPlanCard({
               key={i}
               className="flex gap-2 text-[12px] text-muted-foreground"
             >
-              <IconAlertTriangle className="mt-0.5 size-3 shrink-0 text-warning/80" />
+              <IconAlertTriangle className="mt-0.5 size-3 shrink-0 text-muted-foreground/60" />
               <span>{factor}</span>
             </li>
           ))}
@@ -204,7 +174,6 @@ function DbPlanCard({
           ) : (
             <Button
               size="sm"
-              variant="outline"
               onClick={() => setConfirming(true)}
               className="self-start"
             >
@@ -218,30 +187,6 @@ function DbPlanCard({
         )}
       </div>
     </section>
-  )
-}
-
-function DatabaseSection({
-  run,
-  canApprove,
-  dbApproved,
-  onApproveDbPlan,
-}: {
-  run: Run
-  canApprove: boolean
-  dbApproved: boolean
-  onApproveDbPlan: () => void
-}) {
-  if (!run.dbPlan) return null
-  return (
-    <OutputDisclosure title="Database">
-      <DbPlanCard
-        run={run}
-        canApprove={canApprove}
-        approved={dbApproved}
-        onApprove={onApproveDbPlan}
-      />
-    </OutputDisclosure>
   )
 }
 
@@ -292,6 +237,23 @@ function PullRequestCard({ run }: { run: Run }) {
   )
 }
 
+function PendingPullRequestCard() {
+  return (
+    <section className="border border-dashed border-border/70">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
+        <h3 className="text-xs font-semibold tracking-wide text-muted-foreground">
+          Pull request
+        </h3>
+        <ToneChip tone="idle">Pending</ToneChip>
+      </div>
+      <p className="flex items-center gap-2 px-3 py-3 text-[12px] text-muted-foreground">
+        <IconGitBranch className="size-3.5 shrink-0" />
+        <span>Opens once the band finishes the crossing and the reviewer signs off.</span>
+      </p>
+    </section>
+  )
+}
+
 export function OutputsPanel({
   run,
   canApprove,
@@ -328,13 +290,19 @@ export function OutputsPanel({
           </p>
         ) : (
           <>
-            <DatabaseSection
-              run={run}
-              canApprove={canApprove}
-              dbApproved={dbApproved}
-              onApproveDbPlan={onApproveDbPlan}
-            />
-            {run.pr && <PullRequestCard run={run} />}
+            {run.dbPlan && (
+              <DbPlanCard
+                run={run}
+                canApprove={canApprove}
+                approved={dbApproved}
+                onApprove={onApproveDbPlan}
+              />
+            )}
+            {run.pr ? (
+              <PullRequestCard run={run} />
+            ) : (
+              <PendingPullRequestCard />
+            )}
           </>
         )}
       </div>
