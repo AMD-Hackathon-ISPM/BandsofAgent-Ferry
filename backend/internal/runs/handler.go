@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/ferry/backend/internal/db"
 	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/ferry/backend/internal/scheduler"
+	"github.com/ferry/backend/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -28,10 +30,11 @@ type Handler struct {
 	authService *auth.Service
 	band        *band.Service
 	sched       *scheduler.Scheduler
+	blobs       *storage.MinIOClient
 }
 
-func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service, sched *scheduler.Scheduler) *Handler {
-	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc, sched: sched}
+func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service, sched *scheduler.Scheduler, blobs *storage.MinIOClient) *Handler {
+	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc, sched: sched, blobs: blobs}
 }
 
 type projectVM struct {
@@ -663,6 +666,60 @@ func (h *Handler) ApproveDbPlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"approved": true})
+}
+
+func (h *Handler) GetArtifactContent(w http.ResponseWriter, r *http.Request) {
+	if h.blobs == nil {
+		writeError(w, http.StatusNotFound, "artifact content unavailable")
+		return
+	}
+	companyID, err := uuid.Parse(middleware.GetCompanyID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid company")
+		return
+	}
+	runID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid run id")
+		return
+	}
+	artifactID, err := uuid.Parse(r.PathValue("artifactId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid artifact id")
+		return
+	}
+
+	var storageKey string
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT storage_key
+		FROM generated_artifacts
+		WHERE company_id = $1 AND migration_run_id = $2 AND id = $3
+	`, companyID, runID, artifactID).Scan(&storageKey)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get artifact")
+		return
+	}
+
+	if _, err := h.blobs.GetObjectInfo(r.Context(), storageKey); err != nil {
+		writeError(w, http.StatusNotFound, "artifact content unavailable")
+		return
+	}
+	body, err := h.blobs.Download(r.Context(), storageKey)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "artifact content unavailable")
+		return
+	}
+	defer body.Close()
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, body); err != nil {
+		log.Printf("runs: stream artifact %s failed: %v", artifactID, err)
+	}
 }
 
 func (h *Handler) StreamRun(w http.ResponseWriter, r *http.Request) {

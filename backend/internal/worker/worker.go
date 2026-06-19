@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ type Worker struct {
 	mu      sync.Mutex
 	joined  map[string]bool
 	handled map[string]bool
+	steps   map[string]bool // in-memory fallback for per-step idempotency when rdb is nil
 }
 
 func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, resolveLLM func(string, int) (string, string, string), limiters []*Limiter, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
@@ -60,6 +62,7 @@ func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LL
 		keyByID:     keyByID,
 		joined:      make(map[string]bool),
 		handled:     make(map[string]bool),
+		steps:       make(map[string]bool),
 	}
 }
 
@@ -303,12 +306,34 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	if !w.claim(msg.ID) {
 		return // already handled via the drain or a WebSocket event
 	}
-	if err := w.client.MarkProcessing(ctx, chatID, msg.ID); err != nil {
-		log.Printf("[%s] mark processing failed: %v", w.info.Key, err)
+	runCtx, _ := band.ParseCtx(msg.Content)
+	if w.shouldSkipRun(ctx, runCtx.Run) {
+		log.Printf("[%s] skipping stale/terminal message %s for run %q", w.info.Key, msg.ID, runCtx.Run)
+		if err := w.client.MarkProcessed(ctx, chatID, msg.ID); err != nil {
+			log.Printf("[%s] mark skipped processed failed: %v", w.info.Key, err)
+		}
+		w.cleanupWorkspace(ctx, runCtx.Run)
 		return
 	}
 
-	runCtx, _ := band.ParseCtx(msg.Content)
+	// Per-step idempotency: one logical step = (run, agent, rework). If this step
+	// was already claimed — by a duplicate handoff or a pre-restart process — skip
+	// it entirely so an agent can't run (and hand off) twice. The rework counter
+	// is part of the key, so the legit Commander rework loop still re-runs the
+	// downstream agents on each cycle.
+	if !w.claimStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework) {
+		log.Printf("[%s] duplicate step (run %s, rework %d) already handled; skipping", w.info.Key, runCtx.Run, runCtx.Rework)
+		if err := w.client.MarkProcessed(ctx, chatID, msg.ID); err != nil {
+			log.Printf("[%s] mark duplicate processed failed: %v", w.info.Key, err)
+		}
+		return
+	}
+
+	if err := w.client.MarkProcessing(ctx, chatID, msg.ID); err != nil {
+		log.Printf("[%s] mark processing failed: %v", w.info.Key, err)
+		w.releaseStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework)
+		return
+	}
 
 	// Report the message we received so the backend can surface the pipeline
 	// in the frontend (Band has no transcript API to poll).
@@ -326,14 +351,16 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 
 	// GitHub Connector: open a real PR with the accumulated files.
 	if w.role.createsPR {
-		if url, prErr := w.createPR(ctx, runCtx); prErr != nil {
+		if pr, prErr := w.createPR(ctx, runCtx); prErr != nil {
 			log.Printf("[%s] PR creation failed: %v", w.info.Key, prErr)
 			execReport = "PULL REQUEST: failed - " + prErr.Error()
 			artifact = band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "failed", Body: prErr.Error()})
 		} else {
-			log.Printf("[%s] opened PR: %s", w.info.Key, url)
-			execReport = "PULL REQUEST opened: " + url
-			artifact = band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "open", Body: url})
+			log.Printf("[%s] opened PR: %s", w.info.Key, pr.URL)
+			execReport = "PULL REQUEST opened: " + pr.URL
+			if block, err := pr.artifactBlock(); err == nil {
+				artifact = block
+			}
 		}
 		// The PR stage is the run's last code step — reclaim its workspace.
 		w.cleanupWorkspace(ctx, runCtx.Run)
@@ -345,17 +372,36 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	output, err := w.llm.Complete(ctx, base, key, model, w.limiterForSlot(runCtx.Slot), w.role.system, prompt)
 	if err != nil {
 		log.Printf("[%s] llm failed: %v", w.info.Key, err)
+		w.releaseStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework) // allow a retry on redelivery
 		_ = w.client.MarkFailed(ctx, chatID, msg.ID, err.Error())
 		return
 	}
 
 	// Persist this agent's generated files for downstream stages.
+	var genFiles map[string]string
 	if w.role.producesFiles {
-		if files := extractFiles(output); len(files) > 0 {
-			w.storeFiles(ctx, runCtx.Run, files)
-			log.Printf("[%s] stored %d generated file(s) for run %s", w.info.Key, len(files), runCtx.Run)
+		genFiles = extractFiles(output)
+		if len(genFiles) > 0 {
+			// On a rework, snapshot the prior cycle's files before overwriting so
+			// the Reviewer can diff exactly what this rework changed.
+			if w.info.Key == "code_generator" && runCtx.Rework > 0 {
+				w.snapshotFiles(ctx, runCtx.Run)
+			}
+			w.storeFiles(ctx, runCtx.Run, genFiles)
+			log.Printf("[%s] stored %d generated file(s) for run %s", w.info.Key, len(genFiles), runCtx.Run)
 		} else {
 			log.Printf("[%s] no generated files extracted from model output for run %s", w.info.Key, runCtx.Run)
+		}
+	}
+
+	// Persist this agent's contribution to the shared pipeline doc store so the
+	// next agent reads it directly (keeps handoff messages small). For file-
+	// producing agents the doc is a concise file manifest, not the raw code.
+	if w.role.docOut != "" {
+		if w.role.producesFiles {
+			w.storeDoc(ctx, runCtx.Run, w.role.docOut, fileManifest(w.info.Name, genFiles, runCtx.Rework))
+		} else {
+			w.storeDoc(ctx, runCtx.Run, w.role.docOut, output)
 		}
 	}
 
@@ -368,7 +414,14 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 
 	nextKey, note := w.resolveNext(output, &runCtx, msg.Content)
 	if next, ok := w.roster[nextKey]; ok && nextKey != "" {
+		// When the full output is in the shared doc store, hand off only a compact
+		// summary + pointer so the next agent's prompt isn't carrying the prior
+		// stage's full text in addition to the doc it loads. With no Redis, keep
+		// the full output in the message so context still flows.
 		content := output
+		if w.role.docOut != "" && w.rdb != nil {
+			content = w.handoffSummary(output, genFiles)
+		}
 		if artifact != "" {
 			content += "\n\n" + artifact
 		}
@@ -376,6 +429,7 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		mentions := []band.Mention{{ID: next.ID, Name: next.Name, Handle: next.Handle}}
 		if _, err := w.client.SendMessage(ctx, chatID, content, mentions); err != nil {
 			log.Printf("[%s] handoff to %s failed: %v", w.info.Key, next.Handle, err)
+			w.releaseStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework) // allow a retry on redelivery
 			_ = w.client.MarkFailed(ctx, chatID, msg.ID, err.Error())
 			return
 		}
@@ -387,6 +441,28 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	if err := w.client.MarkProcessed(ctx, chatID, msg.ID); err != nil {
 		log.Printf("[%s] mark processed failed: %v", w.info.Key, err)
 	}
+}
+
+func (w *Worker) shouldSkipRun(ctx context.Context, runID string) bool {
+	if runID == "" {
+		return true
+	}
+	if w.rdb == nil {
+		return false
+	}
+	if _, err := w.rdb.Get(ctx, terminalRunKey(runID)).Result(); err == nil {
+		return true
+	} else if !errors.Is(err, redis.Nil) {
+		log.Printf("[%s] terminal run check failed for %s: %v", w.info.Key, runID, err)
+		return false
+	}
+	if _, err := w.rdb.Get(ctx, activeRunKey(runID)).Result(); err == nil {
+		return false
+	} else if !errors.Is(err, redis.Nil) {
+		log.Printf("[%s] active run check failed for %s: %v", w.info.Key, runID, err)
+		return false
+	}
+	return true
 }
 
 // maxReworks bounds how many times the Commander may bounce a run back to the
@@ -441,6 +517,24 @@ func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, run
 			b.WriteString("\n\n---\n\n")
 		}
 	}
+	// Inject the upstream pipeline docs this role depends on (e.g. the Code
+	// Generator reads spec.md, the Reviewer reads spec.md + changes.md).
+	if len(w.role.docsIn) > 0 {
+		docs := w.loadDocs(ctx, runCtx.Run, w.role.docsIn...)
+		for _, name := range w.role.docsIn {
+			if body := docs[name]; body != "" {
+				fmt.Fprintf(&b, "%s (from the migration pipeline):\n\n%s\n\n---\n\n", name, body)
+			}
+		}
+	}
+	// On a rework, show the Reviewer exactly what changed since the last cycle so
+	// it can verify the flagged blockers were addressed.
+	if w.info.Key == "reviewer" && runCtx.Rework > 0 {
+		if rep := changedFilesReport(w.loadSnapshot(ctx, runCtx.Run), w.loadFiles(ctx, runCtx.Run)); rep != "" {
+			b.WriteString(rep)
+			b.WriteString("\n\n---\n\n")
+		}
+	}
 	if execReport != "" {
 		b.WriteString(execReport)
 		b.WriteString("\n\n---\n\n")
@@ -476,16 +570,76 @@ func (w *Worker) limiterForSlot(slot int) *Limiter {
 
 func (w *Worker) reworkNote(attempt, max int, incoming string) string {
 	summary := summarizeReworkIssues(incoming)
+	paths := extractBlockerPaths(incoming)
 	if summary == "" {
 		return fmt.Sprintf(
-			"the migration needs rework (attempt %d of %d). Regenerate the full file set and fix the blocking issues from the review before continuing down the band.",
+			"the migration needs rework (attempt %d of %d). Fix the blocking issues from the review and re-emit ONLY the files you change (the rest are kept) before continuing down the band.",
 			attempt, max,
 		)
 	}
+	if len(paths) > 0 {
+		return fmt.Sprintf(
+			"the migration needs rework (attempt %d of %d). REGENERATE ONLY these files (plus any file you must touch to fix them) — do NOT re-emit unchanged files:\n%s\n\nBlocking issues to fix:\n%s",
+			attempt, max, bulletList(paths), summary,
+		)
+	}
 	return fmt.Sprintf(
-		"the migration needs rework (attempt %d of %d). Regenerate the full file set and fix these blocking issues before continuing:\n%s",
+		"the migration needs rework (attempt %d of %d). Fix these blocking issues and re-emit ONLY the files you change:\n%s",
 		attempt, max, summary,
 	)
+}
+
+// extractBlockerPaths pulls source file paths out of the reviewer/build output so
+// a rework can be targeted at just those files. Returns up to 10 unique paths.
+func extractBlockerPaths(incoming string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range pathRe.FindAllString(incoming, -1) {
+		m = strings.TrimPrefix(m, "./")
+		if seen[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+		if len(out) == 10 {
+			break
+		}
+	}
+	return out
+}
+
+var pathRe = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(?:go|rs|sql|mod|toml)`)
+
+func bulletList(items []string) string {
+	var b strings.Builder
+	for _, it := range items {
+		fmt.Fprintf(&b, "- %s\n", it)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// handoffSummary builds the compact message that replaces the full output when
+// the full text already lives in the shared doc store.
+func (w *Worker) handoffSummary(output string, genFiles map[string]string) string {
+	if w.role.producesFiles {
+		return fmt.Sprintf("%s produced %d file(s). Full details in %s (shared pipeline store).",
+			w.info.Name, len(genFiles), w.role.docOut)
+	}
+	return headExcerpt(output, 8, 700) + fmt.Sprintf("\n\n(full detail in %s)", w.role.docOut)
+}
+
+// headExcerpt returns the first non-empty lines of s, capped at maxLines and
+// maxChars, for a readable handoff/feed summary.
+func headExcerpt(s string, maxLines, maxChars int) string {
+	lines := nonEmptyLines(s)
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	out := strings.Join(lines, "\n")
+	if len(out) > maxChars {
+		out = out[:maxChars] + "…"
+	}
+	return out
 }
 
 func summarizeReworkIssues(incoming string) string {

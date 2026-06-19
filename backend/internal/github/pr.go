@@ -11,18 +11,18 @@ import (
 )
 
 // OpenPullRequest creates a branch, commits files, and opens a PR using the
-// GitHub Git Data API (no local git needed). Returns the PR HTML URL.
-func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, title, body string, files map[string]string) (string, error) {
+// GitHub Git Data API (no local git needed). Returns the PR HTML URL and number.
+func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, title, body string, files map[string]string) (string, int, error) {
 	if c.token == "" {
-		return "", fmt.Errorf("a GitHub token is required to open a pull request")
+		return "", 0, fmt.Errorf("a GitHub token is required to open a pull request")
 	}
 	if len(files) == 0 {
-		return "", fmt.Errorf("no files to commit")
+		return "", 0, fmt.Errorf("no files to commit")
 	}
 	if base == "" {
 		b, err := c.defaultBranch(ctx, owner, repo)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		base = b
 	}
@@ -34,7 +34,7 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 		} `json:"object"`
 	}
 	if err := c.send(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/git/ref/heads/%s", owner, repo, base), nil, &ref); err != nil {
-		return "", fmt.Errorf("get base ref: %w", err)
+		return "", 0, fmt.Errorf("get base ref: %w", err)
 	}
 	baseSHA := ref.Object.SHA
 
@@ -44,7 +44,7 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 		} `json:"tree"`
 	}
 	if err := c.send(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/git/commits/%s", owner, repo, baseSHA), nil, &baseCommit); err != nil {
-		return "", fmt.Errorf("get base commit: %w", err)
+		return "", 0, fmt.Errorf("get base commit: %w", err)
 	}
 
 	// 2. Blob + tree entry per file.
@@ -62,7 +62,7 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 		err := c.send(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/git/blobs", owner, repo),
 			map[string]string{"content": content, "encoding": "utf-8"}, &blob)
 		if err != nil {
-			return "", fmt.Errorf("create blob %s: %w", path, err)
+			return "", 0, fmt.Errorf("create blob %s: %w", path, err)
 		}
 		entries = append(entries, treeEntry{Path: path, Mode: "100644", Type: "blob", SHA: blob.SHA})
 	}
@@ -73,7 +73,7 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 	}
 	if err := c.send(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/git/trees", owner, repo),
 		map[string]interface{}{"base_tree": baseCommit.Tree.SHA, "tree": entries}, &tree); err != nil {
-		return "", fmt.Errorf("create tree: %w", err)
+		return "", 0, fmt.Errorf("create tree: %w", err)
 	}
 
 	// 4. Commit.
@@ -82,7 +82,7 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 	}
 	if err := c.send(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/git/commits", owner, repo),
 		map[string]interface{}{"message": title, "tree": tree.SHA, "parents": []string{baseSHA}}, &commit); err != nil {
-		return "", fmt.Errorf("create commit: %w", err)
+		return "", 0, fmt.Errorf("create commit: %w", err)
 	}
 
 	// 5. Create the branch (force-update if it already exists).
@@ -91,7 +91,7 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 	if err != nil {
 		if uErr := c.send(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, head),
 			map[string]interface{}{"sha": commit.SHA, "force": true}, nil); uErr != nil {
-			return "", fmt.Errorf("create/update branch: %w", err)
+			return "", 0, fmt.Errorf("create/update branch: %w", err)
 		}
 	}
 
@@ -103,9 +103,9 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 	err = c.send(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls", owner, repo),
 		map[string]string{"title": title, "head": head, "base": base, "body": body}, &pr)
 	if err != nil {
-		return "", fmt.Errorf("open pull request: %w", err)
+		return "", 0, fmt.Errorf("open pull request: %w", err)
 	}
-	return pr.HTMLURL, nil
+	return pr.HTMLURL, pr.Number, nil
 }
 
 // send performs an authenticated JSON request against the GitHub API.

@@ -27,10 +27,13 @@ type App struct {
 }
 
 // NewApp parses the App's PEM private key. Returns (nil, nil) when the App isn't
-// configured (no id/key), so callers can treat App support as optional.
+// configured (no id), so callers can treat App support as optional.
 func NewApp(appID, slug, privateKeyPEM string) (*App, error) {
-	if appID == "" || privateKeyPEM == "" {
+	if appID == "" {
 		return nil, nil
+	}
+	if privateKeyPEM == "" {
+		return nil, fmt.Errorf("GITHUB_APP_ID is set (%s) but no private key was loaded -- set GITHUB_APP_PRIVATE_KEY_PATH to a readable .pem (or GITHUB_APP_PRIVATE_KEY)", appID)
 	}
 	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKeyPEM))
 	if err != nil {

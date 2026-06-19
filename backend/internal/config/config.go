@@ -471,10 +471,17 @@ func splitKeys(raw string) []string {
 // fits on one .env line). The file path takes precedence when readable.
 func githubAppPrivateKey() string {
 	if path := os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"); path != "" {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			log.Printf("config: GITHUB_APP_PRIVATE_KEY_PATH=%q is a directory, not a .pem file; if this is a Docker bind mount, the host source file is missing and Docker created an empty directory -- place the .pem at the host path and recreate the container", path)
+			return strings.ReplaceAll(os.Getenv("GITHUB_APP_PRIVATE_KEY"), `\n`, "\n")
+		}
 		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 			return string(b)
+		} else if err != nil {
+			log.Printf("config: GITHUB_APP_PRIVATE_KEY_PATH=%q could not be read (%v); falling back to GITHUB_APP_PRIVATE_KEY", path, err)
+		} else {
+			log.Printf("config: GITHUB_APP_PRIVATE_KEY_PATH=%q was empty; falling back to GITHUB_APP_PRIVATE_KEY", path)
 		}
-		log.Printf("config: GITHUB_APP_PRIVATE_KEY_PATH=%q could not be read; falling back to GITHUB_APP_PRIVATE_KEY", path)
 	}
 	return strings.ReplaceAll(os.Getenv("GITHUB_APP_PRIVATE_KEY"), `\n`, "\n")
 }

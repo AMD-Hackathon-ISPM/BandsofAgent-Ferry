@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -10,20 +11,36 @@ import (
 	"github.com/ferry/backend/internal/github"
 )
 
+type pullRequestResult struct {
+	URL          string `json:"url"`
+	Number       int    `json:"number"`
+	Title        string `json:"title"`
+	SourceBranch string `json:"sourceBranch"`
+	TargetBranch string `json:"targetBranch"`
+}
+
+func (r pullRequestResult) artifactBlock() (string, error) {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return "", err
+	}
+	return band.MarshalArtifact(band.Artifact{Kind: "pull_request", Status: "open", Body: string(raw)}), nil
+}
+
 // createPR opens a real GitHub pull request with the run's accumulated
-// generated files, using the run creator's OAuth token. Returns the PR URL.
-func (w *Worker) createPR(ctx context.Context, rc band.RunCtx) (string, error) {
+// generated files, using the run creator's OAuth token.
+func (w *Worker) createPR(ctx context.Context, rc band.RunCtx) (pullRequestResult, error) {
 	files := w.loadFiles(ctx, rc.Run)
 	if len(files) == 0 {
-		return "", fmt.Errorf("no generated files to commit")
+		return pullRequestResult{}, fmt.Errorf("no generated files to commit")
 	}
 	owner, name, ok := splitRepo(rc.Repo)
 	if !ok {
-		return "", fmt.Errorf("invalid repo %q", rc.Repo)
+		return pullRequestResult{}, fmt.Errorf("invalid repo %q", rc.Repo)
 	}
 	tokens := w.source.WriteTokens(ctx, rc.User, owner, name)
 	if len(tokens) == 0 {
-		return "", fmt.Errorf("no GitHub write token available (install the Ferry GitHub App on this repo, or set GITHUB_PAT with repo scope)")
+		return pullRequestResult{}, fmt.Errorf("no GitHub write token available (install the Ferry GitHub App on this repo, or set GITHUB_PAT with repo scope)")
 	}
 
 	branch := "ferry-migration-" + shortID(rc.Run)
@@ -35,9 +52,15 @@ func (w *Worker) createPR(ctx context.Context, rc band.RunCtx) (string, error) {
 	// PAT); any other error is terminal and won't be fixed by a different token.
 	var lastErr error
 	for i, token := range tokens {
-		url, err := github.NewClient(token).OpenPullRequest(ctx, owner, name, rc.Branch, branch, title, body, files)
+		url, number, err := github.NewClient(token).OpenPullRequest(ctx, owner, name, rc.Branch, branch, title, body, files)
 		if err == nil {
-			return url, nil
+			return pullRequestResult{
+				URL:          url,
+				Number:       number,
+				Title:        title,
+				SourceBranch: branch,
+				TargetBranch: rc.Branch,
+			}, nil
 		}
 		lastErr = err
 		if !isPermissionError(err) {
@@ -47,7 +70,7 @@ func (w *Worker) createPR(ctx context.Context, rc band.RunCtx) (string, error) {
 			log.Printf("[%s] PR credential %d/%d rejected (no write access), trying fallback: %v", w.info.Key, i+1, len(tokens), err)
 		}
 	}
-	return "", annotateTokenError(lastErr)
+	return pullRequestResult{}, annotateTokenError(lastErr)
 }
 
 // isPermissionError reports whether a GitHub error is an auth/permission failure

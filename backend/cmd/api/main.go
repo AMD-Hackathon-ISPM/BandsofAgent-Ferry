@@ -22,10 +22,10 @@ import (
 	ghpkg "github.com/ferry/backend/internal/github"
 	"github.com/ferry/backend/internal/http/middleware"
 	migratepkg "github.com/ferry/backend/internal/migrate"
-	"github.com/ferry/backend/migrations"
 	runspkg "github.com/ferry/backend/internal/runs"
 	"github.com/ferry/backend/internal/scheduler"
 	"github.com/ferry/backend/internal/storage"
+	"github.com/ferry/backend/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -72,7 +72,7 @@ func main() {
 
 	ghApp, err := ghpkg.NewApp(cfg.GitHub.AppID, cfg.GitHub.AppSlug, cfg.GitHub.AppPrivateKey)
 	if err != nil {
-		log.Printf("github app disabled: %v", err)
+		log.Fatalf("github app configuration failed: %v", err)
 	} else if ghApp != nil {
 		log.Printf("github app enabled (id %s)", cfg.GitHub.AppID)
 	}
@@ -90,9 +90,6 @@ func main() {
 	go sched.Run(context.Background())
 	log.Printf("run scheduler: %d concurrency slot(s)", cfg.Agents.Slots())
 
-	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService, sched)
-	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents, sched)
-
 	// Optional MinIO storage for generated files (best-effort: if it can't be
 	// reached, artifacts still surface via the inline DB preview).
 	var artifactStore *storage.MinIOClient
@@ -103,6 +100,9 @@ func main() {
 	} else {
 		artifactStore = store
 	}
+
+	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService, sched, artifactStore)
+	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents, sched)
 
 	// Mirror Band chat transcripts into agent_messages + Redis so the run
 	// timeline + SSE surface the agent collaboration in the frontend.
@@ -143,6 +143,7 @@ func main() {
 	mux.Handle("POST /api/runs/{id}/cancel", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.CancelRun)))
 	mux.Handle("POST /api/runs/{id}/rerun", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.RerunRun)))
 	mux.Handle("POST /api/runs/{id}/db-plan/approve", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.ApproveDbPlan)))
+	mux.Handle("GET /api/runs/{id}/artifacts/{artifactId}", authMiddleware.Authenticate(http.HandlerFunc(runsHandler.GetArtifactContent)))
 	// SSE: auth handled inside handler (EventSource can't set headers, token via query param)
 	mux.HandleFunc("GET /api/runs/{id}/stream", runsHandler.StreamRun)
 

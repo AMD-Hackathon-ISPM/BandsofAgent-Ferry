@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	queueKey       = "ferry:run:queue"
-	slotKeyPrefix  = "ferry:run:slot:"
-	slotTTL        = 2 * time.Hour
-	reconcileEvery = 8 * time.Second
+	queueKey          = "ferry:run:queue"
+	slotKeyPrefix     = "ferry:run:slot:"
+	activeKeyPrefix   = "ferry:run:active:"
+	terminalKeyPrefix = "ferry:run:terminal:"
+	slotTTL           = 2 * time.Hour
+	reconcileEvery    = 8 * time.Second
 	// activeStatuses occupy a slot.
 	activeStatuses = `('planning','analyzing','translating','db_migration','testing','reviewing','generating_pr')`
 )
@@ -49,7 +51,9 @@ func New(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, bandSvc *band.Ser
 	return &Scheduler{pool: pool, q: q, rdb: rdb, band: bandSvc, slots: slots, staleAfter: staleAfter}
 }
 
-func slotKey(runID string) string { return slotKeyPrefix + runID }
+func slotKey(runID string) string        { return slotKeyPrefix + runID }
+func activeRunKey(runID string) string   { return activeKeyPrefix + runID }
+func terminalRunKey(runID string) string { return terminalKeyPrefix + runID }
 
 // Admit starts a run immediately if a slot is free, otherwise queues it.
 // Returns true if the run was started (false = queued or failed).
@@ -194,6 +198,9 @@ func (s *Scheduler) start(ctx context.Context, runID uuid.UUID, slot int) error 
 		Slot:               slot,
 	}
 
+	s.rdb.Set(ctx, activeRunKey(runID.String()), "1", slotTTL)
+	s.rdb.Del(ctx, terminalRunKey(runID.String()))
+
 	chatID, err := s.band.StartFerryBandRoom(ctx, rc)
 	if err != nil {
 		return fmt.Errorf("start band room: %w", err)
@@ -243,6 +250,8 @@ func (s *Scheduler) fail(ctx context.Context, runID uuid.UUID, msg string) {
 	_, _ = s.pool.Exec(ctx,
 		`UPDATE migration_runs SET status = 'failed', error_message = $1, completed_at = NOW() WHERE id = $2`,
 		msg, runID)
+	s.rdb.Del(ctx, activeRunKey(runID.String()))
+	s.rdb.Set(ctx, terminalRunKey(runID.String()), "failed", slotTTL)
 }
 
 func (s *Scheduler) staleInterval() string {

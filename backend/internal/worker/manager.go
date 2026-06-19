@@ -47,7 +47,7 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 
 	ghApp, err := github.NewApp(cfg.GitHub.AppID, cfg.GitHub.AppSlug, cfg.GitHub.AppPrivateKey)
 	if err != nil {
-		log.Printf("github app disabled: %v", err)
+		return nil, fmt.Errorf("github app configuration failed: %w", err)
 	} else if ghApp != nil {
 		log.Printf("github app enabled (id %s) — PRs use per-repo installation tokens", cfg.GitHub.AppID)
 	}
