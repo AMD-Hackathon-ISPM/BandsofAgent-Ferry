@@ -188,6 +188,18 @@ const run7Messages: AgentMessageVM[] = [
     createdAt: ago(170),
   },
   {
+    id: "m12b",
+    agent: "code_generator",
+    type: "artifact_created",
+    phase: "translation",
+    summary: "Payroll package translated: 2 files plus translation notes.",
+    payload: {
+      files: ["payroll/master.go", "payroll/tax.go"],
+      report: "reports/payroll-translation.md",
+    },
+    createdAt: ago(168),
+  },
+  {
     id: "m13",
     agent: "code_generator",
     type: "handoff",
@@ -250,6 +262,18 @@ const run7Messages: AgentMessageVM[] = [
     summary: "Generated payroll/master_test.go.",
     payload: { artifact: "test_code", file: "payroll/master_test.go" },
     createdAt: ago(52),
+  },
+  {
+    id: "m19b",
+    agent: "test_generator",
+    type: "artifact_created",
+    phase: "testing",
+    summary: "Golden suite ready with a coverage summary.",
+    payload: {
+      files: ["payroll/master_test.go"],
+      report: "reports/golden-suite.md",
+    },
+    createdAt: ago(50),
   },
   {
     id: "m20",
@@ -435,6 +459,57 @@ func TestMaster_GoldenCases(t *testing.T) {
 \t\t}
 \t}
 }`,
+    },
+    {
+      id: "a6",
+      type: "migration_report",
+      fileName: "reports/payroll-translation.md",
+      sizeBytes: 3_980,
+      createdBy: "code_generator",
+      content: `# Payroll package translation
+
+Translated **2 COBOL programs** into idiomatic Go. Source paragraphs map to
+exported methods; fixed-point money uses \`github.com/shopspring/decimal\`.
+
+## Files
+
+- \`payroll/master.go\` — \`PAYROLL-MASTER\`, gross-to-net for one pay period
+- \`payroll/tax.go\` — \`CALC-FED-TAX\`, federal bracket application
+
+## Decisions
+
+1. COMP-3 currency fields → \`decimal.Decimal\` to preserve rounding behavior.
+2. Overtime kept at the legacy 1.5x multiplier past 40 hours.
+3. Tax brackets pulled into a \`brackets\` table keyed by jurisdiction.
+
+## Follow-ups
+
+> Two golden cases differ on leap-year proration; tracked back to Code
+> Generator for a 366-day basis fix.`,
+    },
+    {
+      id: "a7",
+      type: "risk_report",
+      fileName: "reports/golden-suite.md",
+      sizeBytes: 2_640,
+      createdBy: "test_generator",
+      content: `# Golden suite coverage
+
+Captured **38 golden cases** from \`fixtures/payroll-1998..2024\` and ran them
+against the translated package.
+
+## Results
+
+- 36 / 38 passing
+- 2 failing, both in leap-year proration
+
+## Failing cases
+
+1. \`1996 leap proration\`
+2. \`2024 leap proration\`
+
+Both stem from a 365-day basis in \`master.go\`; a 366-day basis in leap years
+is expected to clear them.`,
     },
   ],
   dbPlan: {

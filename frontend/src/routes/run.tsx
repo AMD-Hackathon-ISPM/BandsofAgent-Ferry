@@ -20,9 +20,15 @@ import { useLiveRun, useMediaQuery, useNow } from "@/lib/hooks"
 import { useAuth } from "@/providers/auth-provider"
 import { useAppChrome } from "@/components/app-shell"
 import { cn } from "@/lib/utils"
+import type { Artifact } from "@/lib/types"
+import {
+  artifactByPath,
+  artifactPath,
+} from "@/features/runs/lib/artifact-tree"
 import { CrewRoster } from "@/features/voyage/crew-roster"
 import { BandFeed } from "@/features/runs/components/band-feed"
 import { CodeViewerBody } from "@/features/runs/components/code-viewer"
+import { ReportDialog } from "@/features/runs/components/report-dialog"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { ShipLog } from "@/features/voyage/ship-log"
 import { RunNavInfo } from "@/features/runs/components/run-header"
@@ -162,6 +168,20 @@ function RunReady({
   const [viewedArtifactCount, setViewedArtifactCount] = React.useState(
     run.artifacts.length
   )
+  // Which file the artifacts viewer should focus when opened from a feed chip.
+  // `id` bumps on every click so re-clicking the same file still remounts and
+  // re-selects it. Reports are tracked by path (not the artifact) so the modal
+  // re-resolves against the latest poll, picking up preview -> content updates.
+  const [artifactTarget, setArtifactTarget] = React.useState<{
+    path: string
+    id: number
+  } | null>(null)
+  const [reportPath, setReportPath] = React.useState<string | null>(null)
+  const byPath = React.useMemo(
+    () => artifactByPath(run.artifacts),
+    [run.artifacts]
+  )
+  const reportArtifact = reportPath ? byPath.get(reportPath) ?? null : null
   const [leftOpen, setLeftOpen] = React.useState(true)
   const [rightOpen, setRightOpen] = React.useState(true)
   const isXL = useMediaQuery("(min-width: 1280px)")
@@ -191,6 +211,22 @@ function RunReady({
     setViewedArtifactCount(run.artifacts.length)
     setCenterView("artifacts")
   }, [run.artifacts.length])
+
+  // Jump the artifacts view to a specific file (from a feed chip). Set both the
+  // XL center view and the tabbed pane so it lands wherever the user is.
+  const openArtifact = React.useCallback(
+    (path: string) => {
+      setArtifactTarget((current) => ({ path, id: (current?.id ?? 0) + 1 }))
+      setViewedArtifactCount(run.artifacts.length)
+      setCenterView("artifacts")
+      setPane("artifacts")
+    },
+    [run.artifacts.length, setPane]
+  )
+
+  const openReport = React.useCallback((a: Artifact) => {
+    setReportPath(artifactPath(a))
+  }, [])
 
   const handlePaneChange = React.useCallback(
     (value: string) => {
@@ -276,6 +312,8 @@ function RunReady({
       selectedPhase={selectedPhase}
       onClearFilters={clearFilters}
       onAction={handleAction}
+      onOpenArtifact={openArtifact}
+      onOpenReport={openReport}
       now={now}
       className="h-full"
     />
@@ -290,7 +328,11 @@ function RunReady({
     />
   )
   const artifacts = run.artifacts.length ? (
-    <CodeViewerBody artifacts={run.artifacts} />
+    <CodeViewerBody
+      key={artifactTarget ? `${artifactTarget.path}:${artifactTarget.id}` : "all"}
+      artifacts={run.artifacts}
+      initialPath={artifactTarget?.path}
+    />
   ) : (
     <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
       No artifacts yet. Files appear here as the band produces them.
@@ -312,6 +354,11 @@ function RunReady({
 
   return (
     <div className="flex h-[calc(100svh-4rem)] flex-col overflow-hidden">
+      <ReportDialog
+        artifact={reportArtifact}
+        open={Boolean(reportArtifact)}
+        onOpenChange={(o) => !o && setReportPath(null)}
+      />
       <div
         className={cn(
           "shrink-0 transition-all duration-700 ease-out",
@@ -417,6 +464,8 @@ function RunReady({
                   selectedPhase={selectedPhase}
                   onClearFilters={clearFilters}
                   onAction={handleAction}
+                  onOpenArtifact={openArtifact}
+                  onOpenReport={openReport}
                   now={now}
                   showHeader={false}
                   className="h-full"

@@ -2,6 +2,7 @@ import * as React from "react"
 import {
   IconAlertTriangle,
   IconArrowDown,
+  IconArrowUpRight,
   IconChevronRight,
   IconFile,
   IconX,
@@ -9,6 +10,7 @@ import {
 
 import {
   AGENTS,
+  ARTIFACT_TYPES,
   MESSAGE_TYPES,
   PHASES,
   PHASE_INDEX,
@@ -17,8 +19,14 @@ import {
   type PhaseKey,
 } from "@/lib/domain"
 import { relativeTime } from "@/lib/format"
-import type { AgentMessageVM, Run } from "@/lib/types"
+import type { AgentMessageVM, Artifact, Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import {
+  artifactByPath,
+  artifactPath,
+  baseName,
+  messageAttachments,
+} from "@/features/runs/lib/artifact-tree"
 import { AgentGlyph } from "@/features/migrations/components/agent"
 import { BandChatter } from "@/features/runs/components/band-chatter"
 import { Markdown } from "@/components/markdown"
@@ -37,6 +45,9 @@ const TYPE_TONE: Record<string, string> = {
   success: "text-success",
   warning: "text-warning",
 }
+
+// Payload keys that drive the attachment chips, not the "Details" grid.
+const ATTACHMENT_KEYS = new Set(["file", "files", "report", "artifact", "content"])
 
 // What the active agent is doing right now, per phase. Two words, Title Case,
 // so the processing line reads like a live status, not a spinner.
@@ -65,9 +76,7 @@ function PrimitiveValue({ value }: { value: unknown }) {
 }
 
 function PayloadView({ payload }: { payload: Record<string, unknown> }) {
-  const entries = Object.entries(payload).filter(
-    ([k]) => k !== "file" && k !== "artifact" && k !== "content"
-  )
+  const entries = Object.entries(payload).filter(([k]) => !ATTACHMENT_KEYS.has(k))
   if (entries.length === 0) return null
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-muted/40 p-2.5 font-mono text-[11px]">
@@ -95,15 +104,113 @@ function PayloadView({ payload }: { payload: Record<string, unknown> }) {
   )
 }
 
+function FileChip({
+  icon: Icon,
+  label,
+  title,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  title: string
+  onClick?: () => void
+}) {
+  const className = cn(
+    "group/chip inline-flex max-w-full items-center gap-1.5 border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground",
+    onClick &&
+      "cursor-pointer transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+  )
+  const inner = (
+    <>
+      <Icon className="size-3 shrink-0" />
+      <span className="truncate">{label}</span>
+      {onClick && (
+        <IconArrowUpRight className="size-3 shrink-0 text-muted-foreground/50 transition-colors group-hover/chip:text-foreground" />
+      )}
+    </>
+  )
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={title}
+        title={title}
+        className={className}
+      >
+        {inner}
+      </button>
+    )
+  }
+  return (
+    <span title={title} className={className}>
+      {inner}
+    </span>
+  )
+}
+
+function MessageAttachments({
+  message,
+  byPath,
+  onOpenArtifact,
+  onOpenReport,
+}: {
+  message: AgentMessageVM
+  byPath: Map<string, Artifact>
+  onOpenArtifact?: (path: string) => void
+  onOpenReport?: (a: Artifact) => void
+}) {
+  const { code, reports, unresolved } = React.useMemo(
+    () => messageAttachments(message, byPath),
+    [message, byPath]
+  )
+  if (code.length === 0 && reports.length === 0 && unresolved.length === 0)
+    return null
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {code.map((a) => {
+        const path = artifactPath(a)
+        return (
+          <FileChip
+            key={`c-${a.id}`}
+            icon={ARTIFACT_TYPES[a.type].icon}
+            label={baseName(path)}
+            title={`Open ${path} in code viewer`}
+            onClick={onOpenArtifact ? () => onOpenArtifact(path) : undefined}
+          />
+        )
+      })}
+      {reports.map((a) => (
+        <FileChip
+          key={`r-${a.id}`}
+          icon={ARTIFACT_TYPES[a.type].icon}
+          label={baseName(a.fileName)}
+          title={`Open report ${baseName(a.fileName)}`}
+          onClick={onOpenReport ? () => onOpenReport(a) : undefined}
+        />
+      ))}
+      {unresolved.map((path) => (
+        <FileChip key={`u-${path}`} icon={IconFile} label={baseName(path)} title={path} />
+      ))}
+    </div>
+  )
+}
+
 function MessageRow({
   message,
   isNew,
+  byPath,
   onAction,
+  onOpenArtifact,
+  onOpenReport,
   now,
 }: {
   message: AgentMessageVM
   isNew: boolean
+  byPath: Map<string, Artifact>
   onAction?: (m: AgentMessageVM) => void
+  onOpenArtifact?: (path: string) => void
+  onOpenReport?: (a: Artifact) => void
   now: number
 }) {
   const agent = AGENTS[message.agent]
@@ -111,7 +218,6 @@ function MessageRow({
   const TypeIcon = typeMeta.icon
   const phase = PHASES[PHASE_INDEX[message.phase]]
   const target = message.targetAgent ? AGENTS[message.targetAgent] : null
-  const hasFile = typeof message.payload?.file === "string"
   const content =
     typeof message.payload?.content === "string"
       ? message.payload.content.trim()
@@ -119,9 +225,7 @@ function MessageRow({
   const isArtifact = message.type === "artifact_created"
   const hasDetails =
     message.payload &&
-    Object.keys(message.payload).some(
-      (k) => k !== "file" && k !== "artifact" && k !== "content"
-    )
+    Object.keys(message.payload).some((k) => !ATTACHMENT_KEYS.has(k))
   const actionLabel =
     message.phase === "db_migration" ? "Review DB plan" : "View blocker"
 
@@ -177,12 +281,12 @@ function MessageRow({
           </p>
         )}
 
-        {hasFile && (
-          <span className="mt-2 inline-flex items-center gap-1.5 border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            <IconFile className="size-3" />
-            {String(message.payload!.file)}
-          </span>
-        )}
+        <MessageAttachments
+          message={message}
+          byPath={byPath}
+          onOpenArtifact={onOpenArtifact}
+          onOpenReport={onOpenReport}
+        />
 
         {message.requiresAction && (
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-warning/35 bg-warning/10 px-2.5 py-1.5">
@@ -270,6 +374,8 @@ export function BandFeed({
   selectedPhase,
   onClearFilters,
   onAction,
+  onOpenArtifact,
+  onOpenReport,
   now,
   className,
   showHeader = true,
@@ -281,11 +387,17 @@ export function BandFeed({
   selectedPhase?: PhaseKey | null
   onClearFilters?: () => void
   onAction?: (m: AgentMessageVM) => void
+  onOpenArtifact?: (path: string) => void
+  onOpenReport?: (a: Artifact) => void
   now: number
   className?: string
   showHeader?: boolean
 }) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
+  const byPath = React.useMemo(
+    () => artifactByPath(run.artifacts),
+    [run.artifacts]
+  )
   const [atBottom, setAtBottom] = React.useState(true)
   const [newCount, setNewCount] = React.useState(0)
   const prevLen = React.useRef(messages.length)
@@ -414,7 +526,10 @@ export function BandFeed({
                 key={m.id}
                 message={m}
                 isNew={streamedIds.has(m.id)}
+                byPath={byPath}
                 onAction={onAction}
+                onOpenArtifact={onOpenArtifact}
+                onOpenReport={onOpenReport}
                 now={now}
               />
             ))}

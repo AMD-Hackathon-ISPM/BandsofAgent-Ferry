@@ -45,6 +45,14 @@ export interface AgentMessageVM {
   type: MessageType
   phase: PhaseKey
   summary: string
+  /**
+   * Free-form metadata shown under "Details". A few keys also drive the feed's
+   * file-attachment chips, each a repo-relative path matched against
+   * `Run.artifacts`:
+   *   `file`   — single file (legacy)
+   *   `files`  — several files in one message (string[])
+   *   `report` — a markdown report opened in the reading modal
+   */
   payload?: Record<string, unknown>
   requiresAction?: boolean
   targetAgent?: AgentKey
