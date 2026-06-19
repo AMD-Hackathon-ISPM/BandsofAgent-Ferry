@@ -1,27 +1,18 @@
-import { useNavigate } from "react-router-dom"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
-  IconCircleCheck,
   IconClock,
   IconGitBranch,
   IconGitCommit,
   IconHourglass,
-  IconPlayerPlay,
-  IconRefresh,
 } from "@tabler/icons-react"
 
 import { isLive } from "@/lib/domain"
 import { clock, elapsed, shortSha } from "@/lib/format"
 import type { Run } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { rerunRun, startRun } from "@/lib/api"
-import { useAuth } from "@/providers/auth-provider"
 import { LangRoute } from "@/features/migrations/components/lang-route"
 import { StatusBadge } from "@/features/migrations/components/status-badge"
 import { Button } from "@/components/ui/button"
-
-const ACTION_BUTTON_CLASS = "h-8 min-w-28 justify-center px-3 text-sm"
 
 function QueueInfoButton({ run }: { run: Run }) {
   if (run.status !== "pending") return null
@@ -40,106 +31,6 @@ function QueueInfoButton({ run }: { run: Run }) {
       }
     >
       <IconHourglass />
-    </Button>
-  )
-}
-
-export function RunNavActions({ run }: { run: Run }) {
-  const { accessToken } = useAuth()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const live = isLive(run.status)
-
-  const startMutation = useMutation({
-    mutationFn: () => startRun(accessToken ?? "", run.id),
-    onSuccess: () => {
-      toast.success("Run queued", {
-        description:
-          "Ferry will dispatch the band when capacity is available. Use the queue info button for status context.",
-      })
-      queryClient.invalidateQueries({ queryKey: ["run", run.id] })
-    },
-    onError: () => toast.error("Failed to start run"),
-  })
-
-  const rerunMutation = useMutation({
-    mutationFn: () => rerunRun(accessToken ?? "", run.id),
-    onSuccess: (result) => {
-      toast.success("New voyage session created", {
-        description: `Run #${result.runNumber} starts as a separate rerun.`,
-      })
-      queryClient.invalidateQueries({ queryKey: ["recent-runs"] })
-      navigate(`/runs/${result.id}`)
-    },
-    onError: () => toast.error("Failed to rerun"),
-  })
-
-  if (run.status === "completed") {
-    return (
-      <Button
-        size="sm"
-        className={cn(
-          ACTION_BUTTON_CLASS,
-          "border-success/40 bg-success/15 text-success hover:bg-success/20"
-        )}
-        onClick={() =>
-          toast.success("Migration succeeded", {
-            description: run.pr
-              ? `Pull request #${run.pr.number} is ready.`
-              : "All stages are complete.",
-          })
-        }
-      >
-        <IconCircleCheck data-icon="inline-start" />
-        Success
-      </Button>
-    )
-  }
-
-  if (
-    run.status === "failed" ||
-    run.status === "blocked" ||
-    run.status === "needs_rework"
-  ) {
-    return (
-      <Button
-        size="sm"
-        disabled={rerunMutation.isPending}
-        className={cn(
-          ACTION_BUTTON_CLASS,
-          "border-warning/45 bg-warning/15 text-warning hover:bg-warning/25"
-        )}
-        onClick={() => rerunMutation.mutate()}
-      >
-        <IconRefresh data-icon="inline-start" />
-        Re run
-      </Button>
-    )
-  }
-
-  if (live) return null
-
-  return (
-    <Button
-      size="sm"
-      disabled={startMutation.isPending}
-      className={cn(
-        ACTION_BUTTON_CLASS,
-        "border-primary/45 bg-primary text-primary-foreground hover:bg-primary/85"
-      )}
-      onClick={() => startMutation.mutate()}
-    >
-      {startMutation.isPending ? (
-        <>
-          <IconHourglass data-icon="inline-start" />
-          Queueing
-        </>
-      ) : (
-        <>
-          <IconPlayerPlay data-icon="inline-start" />
-          Run
-        </>
-      )}
     </Button>
   )
 }

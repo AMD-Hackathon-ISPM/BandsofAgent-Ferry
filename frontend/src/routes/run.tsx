@@ -25,7 +25,7 @@ import { BandFeed } from "@/features/runs/components/band-feed"
 import { CodeViewerBody } from "@/features/runs/components/code-viewer"
 import { OutputsPanel } from "@/features/runs/components/outputs-panel"
 import { ShipLog } from "@/features/voyage/ship-log"
-import { RunNavActions, RunNavInfo } from "@/features/runs/components/run-header"
+import { RunNavInfo } from "@/features/runs/components/run-header"
 import { VoyageView } from "@/features/voyage/voyage-view"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -172,20 +172,14 @@ function RunReady({
     () => <RunNavInfo run={liveRun} now={now} />,
     [liveRun, now]
   )
-  const chromeActions = React.useMemo(
-    () => <RunNavActions run={liveRun} />,
-    [liveRun]
-  )
-
   React.useEffect(() => {
     setChrome({
       content: chromeContent,
-      actions: chromeActions,
       logoLabel: "Back to runs",
       logoTo: "/app",
     })
     return () => setChrome(null)
-  }, [setChrome, chromeContent, chromeActions])
+  }, [setChrome, chromeContent])
 
   React.useEffect(() => {
     if (centerView === "artifacts" || pane === "artifacts") {
