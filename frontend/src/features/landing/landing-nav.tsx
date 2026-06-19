@@ -1,7 +1,5 @@
-import { Link } from "react-router-dom"
 import { IconBrandGithub, IconDeviceDesktop, IconMoon, IconSun } from "@tabler/icons-react"
 
-import { useAuth } from "@/providers/auth-provider"
 import { Logo } from "@/components/brand"
 import { useTheme, type Theme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
@@ -73,8 +71,6 @@ function AppearanceMenu() {
 }
 
 export function LandingNav() {
-  const { user } = useAuth()
-
   return (
     <header className="absolute inset-x-0 top-0 z-40 border-b border-transparent bg-transparent">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
@@ -87,11 +83,6 @@ export function LandingNav() {
         </a>
 
         <div className="flex items-center gap-3">
-          {!user && (
-            <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
-              <Link to="/login">Sign in</Link>
-            </Button>
-          )}
           <AppearanceMenu />
           <Button
             asChild
@@ -104,7 +95,7 @@ export function LandingNav() {
               <IconBrandGithub />
             </a>
           </Button>
-          <StartMigrationButton size="lg" className="px-3.5" />
+          <StartMigrationButton size="lg" className="px-3.5" label="Sign In" withArrow={false} />
         </div>
       </div>
     </header>

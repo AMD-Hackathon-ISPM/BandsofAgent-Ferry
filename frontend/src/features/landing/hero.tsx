@@ -63,7 +63,7 @@ export function Hero() {
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
-            <StartMigrationButton size="lg" className="px-3.5" />
+            <StartMigrationButton size="lg" className="px-3.5" withArrow />
             <Button asChild size="lg" variant="outline" className="px-3.5">
               <a href="#demo">
                 <IconArrowDown data-icon="inline-start" />
