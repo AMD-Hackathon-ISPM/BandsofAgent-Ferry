@@ -202,3 +202,18 @@ func (w *Worker) loadFiles(ctx context.Context, runID string) map[string]string 
 	}
 	return res
 }
+
+func (w *Worker) markRunTerminal(ctx context.Context, runID, reason string) {
+	if w.rdb == nil || runID == "" {
+		return
+	}
+	if reason == "" {
+		reason = "terminal"
+	}
+	if err := w.rdb.Set(ctx, terminalRunKey(runID), reason, claimTTL).Err(); err != nil {
+		log.Printf("[%s] terminal run mark failed for %s: %v", w.info.Key, runID, err)
+	}
+	if err := w.rdb.Del(ctx, activeRunKey(runID)).Err(); err != nil {
+		log.Printf("[%s] active run cleanup failed for %s: %v", w.info.Key, runID, err)
+	}
+}

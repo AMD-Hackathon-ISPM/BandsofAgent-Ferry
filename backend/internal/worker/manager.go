@@ -36,7 +36,7 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 	for i := range limiters {
 		limiters[i] = NewLimiter(cfg.Agents.MaxConcurrency)
 	}
-	llm := NewLLM()
+	llm := NewLLM(cfg.Model.MaxTokens)
 	log.Printf("run concurrency slots: %d (LLM concurrency/slot: %d)", slots, cfg.Agents.MaxConcurrency)
 
 	rdb := redis.NewClient(&redis.Options{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 const (
 	maxStageAssistRounds = 4
 	maxRepoExecCommands  = 4
+	maxZeroFileRetries   = 2
 	repoExecTimeout      = 90 * time.Second
 	repoExecImage        = "alpine:3.20"
 )
@@ -53,11 +55,46 @@ type repoExecCommand struct {
 }
 
 func (w *Worker) completeStage(ctx context.Context, runCtx band.RunCtx, prompt string) (string, error) {
+	if err := w.ensureGeneratedFilesBeforeVerdict(ctx, runCtx.Run); err != nil {
+		return "", terminalStageError{err: err}
+	}
+
+	attempts := 1
+	if w.role.producesFiles {
+		attempts += maxZeroFileRetries
+	}
+
+	var output string
+	for attempt := 0; attempt < attempts; attempt++ {
+		stagePrompt := prompt
+		forceAnswer := false
+		if attempt > 0 {
+			stagePrompt = zeroFileRetryPrompt(prompt)
+			forceAnswer = true
+		}
+
+		res, err := w.completeStageOnce(ctx, runCtx, stagePrompt, forceAnswer)
+		if err != nil {
+			return "", err
+		}
+		w.logCompletion(runCtx, attempt+1, res)
+		output = res.Text
+
+		if !w.role.producesFiles || len(extractFiles(output)) > 0 {
+			return output, nil
+		}
+		log.Printf("[%s] zero generated files extracted for run %s on attempt %d", w.info.Key, runCtx.Run, attempt+1)
+	}
+
+	return "", terminalStageError{err: fmt.Errorf("%s produced no files after %d attempts; expected fenced // file: <path> blocks", w.info.Key, attempts)}
+}
+
+func (w *Worker) completeStageOnce(ctx context.Context, runCtx band.RunCtx, prompt string, forceAnswer bool) (completionResult, error) {
 	base, key, model := w.resolveLLM(runCtx.Tgt, runCtx.Slot)
 	lim := w.limiterForSlot(runCtx.Slot)
 
-	allowRepoExec := w.canUseRepoExec(runCtx)
-	allowConsult := w.canUseConsult(runCtx)
+	allowRepoExec := !forceAnswer && w.canUseRepoExec(runCtx)
+	allowConsult := !forceAnswer && w.canUseConsult(runCtx)
 	if !allowRepoExec && !allowConsult {
 		return w.llm.Complete(ctx, base, key, model, lim, w.role.system, prompt)
 	}
@@ -67,11 +104,11 @@ func (w *Worker) completeStage(ctx context.Context, runCtx band.RunCtx, prompt s
 		fullPrompt := w.assistPrompt(prompt, history, allowRepoExec, allowConsult, round == maxStageAssistRounds-1)
 		output, err := w.llm.Complete(ctx, base, key, model, lim, w.role.system, fullPrompt)
 		if err != nil {
-			return "", err
+			return completionResult{}, err
 		}
 
-		repoReq, repoPresent, repoErr := parseRepoExecRequest(output)
-		consultReq, consultPresent, consultErr := parseConsultRequest(output)
+		repoReq, repoPresent, repoErr := parseRepoExecRequest(output.Text)
+		consultReq, consultPresent, consultErr := parseConsultRequest(output.Text)
 		switch {
 		case repoPresent && consultPresent:
 			history = append(history, "ASSIST REQUEST ERROR:\nrequest either ferry-repoexec or ferry-consult, not both in one reply")
@@ -107,6 +144,31 @@ func (w *Worker) completeStage(ctx context.Context, runCtx band.RunCtx, prompt s
 
 	finalPrompt := w.assistPrompt(prompt, history, allowRepoExec, allowConsult, true) + "\n\nASSIST LIMIT REACHED. Do not request more repo commands or consultations. Produce your best answer now."
 	return w.llm.Complete(ctx, base, key, model, lim, w.role.system, finalPrompt)
+}
+
+func (w *Worker) ensureGeneratedFilesBeforeVerdict(ctx context.Context, runID string) error {
+	if w.info.Key != "reviewer" && w.info.Key != "commander" {
+		return nil
+	}
+	if len(w.loadFiles(ctx, runID)) == 0 {
+		return fmt.Errorf("%s cannot run: no generated files in %s", w.info.Key, filesKey(runID))
+	}
+	return nil
+}
+
+func zeroFileRetryPrompt(prompt string) string {
+	return prompt + "\n\n---\n\nZERO-FILE CORRECTION:\nYour previous response did not contain any parseable generated files. You must re-emit fenced `// file: <path>` blocks now. Every generated file must be in a fenced code block whose first line is `// file: <path>`. Do not explain, do not request repository commands, and do not hand off until the file blocks are present."
+}
+
+func (w *Worker) logCompletion(runCtx band.RunCtx, attempt int, res completionResult) {
+	if w.info.Key != "code_generator" {
+		return
+	}
+	usage := "usage=unknown"
+	if res.Usage != nil {
+		usage = fmt.Sprintf("prompt_tokens=%d completion_tokens=%d total_tokens=%d", res.Usage.PromptTokens, res.Usage.CompletionTokens, res.Usage.TotalTokens)
+	}
+	log.Printf("[%s] completion diagnostics run=%s attempt=%d prompt_bytes=%d output_bytes=%d finish_reason=%q %s", w.info.Key, runCtx.Run, attempt, res.PromptBytes, res.OutputBytes, res.FinishReason, usage)
 }
 
 func (w *Worker) canUseRepoExec(runCtx band.RunCtx) bool {

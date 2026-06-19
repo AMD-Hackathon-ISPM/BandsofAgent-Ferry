@@ -308,7 +308,7 @@ func Load() (*Config, error) {
 			APIKey:      getEnv("MODEL_API_KEY", ""),
 			Model:       getEnv("MODEL_NAME", "meta-llama/Meta-Llama-3.1-70B-Instruct"),
 			Temperature: getEnvAsFloat("MODEL_TEMPERATURE", 0.7),
-			MaxTokens:   getEnvAsInt("MODEL_MAX_TOKENS", 4096),
+			MaxTokens:   getEnvAsInt("MODEL_MAX_TOKENS", 16384),
 			Endpoint:    getEnv("MODEL_ENDPOINT", ""),
 		},
 		GitHub: GitHubConfig{

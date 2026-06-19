@@ -40,17 +40,19 @@ func (l *Limiter) release() { <-l.ch }
 // concurrency limiter are passed per call so one instance serves every agent,
 // run slot (key), and target-specific model.
 type LLM struct {
-	http *http.Client
-	idle time.Duration
+	http      *http.Client
+	idle      time.Duration
+	maxTokens int
 }
 
-func NewLLM() *LLM {
+func NewLLM(maxTokens int) *LLM {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = 45 * time.Second
 
 	return &LLM{
-		http: &http.Client{Transport: transport},
-		idle: 90 * time.Second,
+		http:      &http.Client{Transport: transport},
+		idle:      90 * time.Second,
+		maxTokens: maxTokens,
 	}
 }
 
@@ -64,12 +66,16 @@ type chatCompletionRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	Stream      bool          `json:"stream"`
+	MaxTokens   int           `json:"max_tokens,omitempty"`
 }
 
 type chatCompletionResponse struct {
 	Choices []struct {
-		Message chatMessage `json:"message"`
+		Message      chatMessage `json:"message"`
+		Text         string      `json:"text"`
+		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *completionUsage `json:"usage"`
 }
 
 type chatCompletionChunk struct {
@@ -77,9 +83,25 @@ type chatCompletionChunk struct {
 		Delta struct {
 			Content string `json:"content"`
 		} `json:"delta"`
-		Message chatMessage `json:"message"`
-		Text    string      `json:"text"`
+		Message      chatMessage `json:"message"`
+		Text         string      `json:"text"`
+		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *completionUsage `json:"usage"`
+}
+
+type completionUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type completionResult struct {
+	Text         string
+	FinishReason string
+	Usage        *completionUsage
+	PromptBytes  int
+	OutputBytes  int
 }
 
 type activityReadCloser struct {
@@ -97,10 +119,10 @@ func (r *activityReadCloser) Read(p []byte) (int, error) {
 
 const maxLLMRetries = 5
 
-func (l *LLM) Complete(ctx context.Context, baseURL, apiKey, model string, lim *Limiter, system, user string) (string, error) {
+func (l *LLM) Complete(ctx context.Context, baseURL, apiKey, model string, lim *Limiter, system, user string) (completionResult, error) {
 	if lim != nil {
 		if err := lim.acquire(ctx); err != nil {
-			return "", err
+			return completionResult{}, err
 		}
 		defer lim.release()
 	}
@@ -113,40 +135,44 @@ func (l *LLM) Complete(ctx context.Context, baseURL, apiKey, model string, lim *
 		},
 		Temperature: 0.3,
 		Stream:      true,
+		MaxTokens:   l.maxTokens,
 	}
 	raw, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
+		return completionResult{}, fmt.Errorf("marshal: %w", err)
 	}
 
 	base := strings.TrimSuffix(baseURL, "/")
+	promptBytes := len(system) + len(user)
 	var lastErr error
 	for attempt := 0; attempt < maxLLMRetries; attempt++ {
-		text, retryAfter, err := l.do(ctx, base, apiKey, raw)
+		res, retryAfter, err := l.do(ctx, base, apiKey, raw)
 		if err == nil {
-			return text, nil
+			res.PromptBytes = promptBytes
+			res.OutputBytes = len(res.Text)
+			return res, nil
 		}
 		lastErr = err
 		if retryAfter <= 0 {
-			return "", err
+			return completionResult{}, err
 		}
 
 		select {
 		case <-time.After(retryAfter):
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return completionResult{}, ctx.Err()
 		}
 	}
-	return "", fmt.Errorf("exhausted retries: %w", lastErr)
+	return completionResult{}, fmt.Errorf("exhausted retries: %w", lastErr)
 }
 
-func (l *LLM) do(ctx context.Context, baseURL, apiKey string, raw []byte) (text string, retryAfter time.Duration, err error) {
+func (l *LLM) do(ctx context.Context, baseURL, apiKey string, raw []byte) (completionResult, time.Duration, error) {
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
-		return "", 0, err
+		return completionResult{}, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "text/event-stream, application/json")
@@ -154,16 +180,16 @@ func (l *LLM) do(ctx context.Context, baseURL, apiKey string, raw []byte) (text 
 
 	resp, err := l.http.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("chat/completions: %w", err)
+		return completionResult{}, 0, fmt.Errorf("chat/completions: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return "", backoffFrom(resp.Header.Get("Retry-After")), fmt.Errorf("rate limited (429)")
+		return completionResult{}, backoffFrom(resp.Header.Get("Retry-After")), fmt.Errorf("rate limited (429)")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", 0, fmt.Errorf("chat/completions: status %d: %s", resp.StatusCode, string(snippet))
+		return completionResult{}, 0, fmt.Errorf("chat/completions: status %d: %s", resp.StatusCode, string(snippet))
 	}
 
 	reader := &activityReadCloser{
@@ -178,11 +204,11 @@ func (l *LLM) do(ctx context.Context, baseURL, apiKey string, raw []byte) (text 
 		parse = readChatCompletionStream
 	}
 
-	text, err = l.readWithIdleWatch(reqCtx, cancel, reader, parse)
+	res, err := l.readWithIdleWatch(reqCtx, cancel, reader, parse)
 	if err != nil {
-		return "", 0, err
+		return completionResult{}, 0, err
 	}
-	return text, 0, nil
+	return res, 0, nil
 }
 
 func backoffFrom(retryAfter string) time.Duration {
@@ -194,7 +220,7 @@ func backoffFrom(retryAfter string) time.Duration {
 	return 3 * time.Second
 }
 
-func (l *LLM) readWithIdleWatch(ctx context.Context, cancel context.CancelFunc, body *activityReadCloser, parse func(io.Reader) (string, error)) (string, error) {
+func (l *LLM) readWithIdleWatch(ctx context.Context, cancel context.CancelFunc, body *activityReadCloser, parse func(io.Reader) (completionResult, error)) (completionResult, error) {
 	activity := make(chan struct{}, 1)
 	body.notify = func() {
 		select {
@@ -204,14 +230,14 @@ func (l *LLM) readWithIdleWatch(ctx context.Context, cancel context.CancelFunc, 
 	}
 
 	type result struct {
-		text string
-		err  error
+		res completionResult
+		err error
 	}
 
 	done := make(chan result, 1)
 	go func() {
-		text, err := parse(body)
-		done <- result{text: text, err: err}
+		res, err := parse(body)
+		done <- result{res: res, err: err}
 	}()
 
 	timer := time.NewTimer(l.idle)
@@ -220,7 +246,7 @@ func (l *LLM) readWithIdleWatch(ctx context.Context, cancel context.CancelFunc, 
 	for {
 		select {
 		case res := <-done:
-			return res.text, res.err
+			return res.res, res.err
 		case <-activity:
 			if !timer.Stop() {
 				select {
@@ -232,47 +258,58 @@ func (l *LLM) readWithIdleWatch(ctx context.Context, cancel context.CancelFunc, 
 		case <-timer.C:
 			cancel()
 			_ = body.Close()
-			return "", fmt.Errorf("chat/completions: idle timeout after %s with no response body progress", l.idle)
+			return completionResult{}, fmt.Errorf("chat/completions: idle timeout after %s with no response body progress", l.idle)
 		case <-ctx.Done():
 			cancel()
 			_ = body.Close()
-			return "", ctx.Err()
+			return completionResult{}, ctx.Err()
 		}
 	}
 }
 
-func readChatCompletionJSON(r io.Reader) (string, error) {
+func readChatCompletionJSON(r io.Reader) (completionResult, error) {
 	var out chatCompletionResponse
 	if err := json.NewDecoder(r).Decode(&out); err != nil {
-		return "", fmt.Errorf("decode: %w", err)
+		return completionResult{}, fmt.Errorf("decode: %w", err)
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("chat/completions: no choices returned")
+		return completionResult{}, fmt.Errorf("chat/completions: no choices returned")
 	}
-	return strings.TrimSpace(out.Choices[0].Message.Content), nil
+	choice := out.Choices[0]
+	text := choice.Message.Content
+	if text == "" {
+		text = choice.Text
+	}
+	return completionResult{
+		Text:         strings.TrimSpace(text),
+		FinishReason: choice.FinishReason,
+		Usage:        out.Usage,
+	}, nil
 }
 
-func readChatCompletionStream(r io.Reader) (string, error) {
+func readChatCompletionStream(r io.Reader) (completionResult, error) {
 	reader := bufio.NewReader(r)
 	var text strings.Builder
 	var event strings.Builder
+	res := completionResult{}
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
-			return "", fmt.Errorf("stream read: %w", err)
+			return completionResult{}, fmt.Errorf("stream read: %w", err)
 		}
 
 		if line != "" {
 			trimmed := strings.TrimRight(line, "\r\n")
 			if trimmed == "" {
-				done, eventErr := appendStreamEvent(&text, event.String())
+				done, eventErr := appendStreamEvent(&text, &res, event.String())
 				if eventErr != nil {
-					return "", eventErr
+					return completionResult{}, eventErr
 				}
 				event.Reset()
 				if done {
-					return strings.TrimSpace(text.String()), nil
+					res.Text = strings.TrimSpace(text.String())
+					return res, nil
 				}
 			} else if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
@@ -291,19 +328,21 @@ func readChatCompletionStream(r io.Reader) (string, error) {
 	}
 
 	if event.Len() > 0 {
-		done, err := appendStreamEvent(&text, event.String())
+		done, err := appendStreamEvent(&text, &res, event.String())
 		if err != nil {
-			return "", err
+			return completionResult{}, err
 		}
 		if done {
-			return strings.TrimSpace(text.String()), nil
+			res.Text = strings.TrimSpace(text.String())
+			return res, nil
 		}
 	}
 
-	return strings.TrimSpace(text.String()), nil
+	res.Text = strings.TrimSpace(text.String())
+	return res, nil
 }
 
-func appendStreamEvent(dst *strings.Builder, payload string) (bool, error) {
+func appendStreamEvent(dst *strings.Builder, res *completionResult, payload string) (bool, error) {
 	if payload == "" {
 		return false, nil
 	}
@@ -315,7 +354,13 @@ func appendStreamEvent(dst *strings.Builder, payload string) (bool, error) {
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return false, fmt.Errorf("stream decode: %w", err)
 	}
+	if chunk.Usage != nil {
+		res.Usage = chunk.Usage
+	}
 	for _, choice := range chunk.Choices {
+		if choice.FinishReason != "" {
+			res.FinishReason = choice.FinishReason
+		}
 		switch {
 		case choice.Delta.Content != "":
 			dst.WriteString(choice.Delta.Content)

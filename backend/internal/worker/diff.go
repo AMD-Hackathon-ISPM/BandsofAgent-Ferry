@@ -108,7 +108,7 @@ func fileManifest(agentName string, files map[string]string, rework int) string 
 	sort.Strings(paths)
 	var b strings.Builder
 	if rework > 0 {
-		fmt.Fprintf(&b, "%s — files written (rework %d):\n", agentName, rework)
+		fmt.Fprintf(&b, "%s — files modified (rework %d):\n", agentName, rework)
 	} else {
 		fmt.Fprintf(&b, "%s — files written:\n", agentName)
 	}

@@ -91,7 +91,7 @@ func (w *Worker) runConsult(ctx context.Context, runCtx band.RunCtx, req consult
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "CONSULT RESULT FROM %s:\n", consultant)
-	b.WriteString(strings.TrimSpace(answer))
+	b.WriteString(strings.TrimSpace(answer.Text))
 	return b.String(), nil
 }
 
@@ -114,7 +114,7 @@ func (w *Worker) buildConsultPrompt(ctx context.Context, runCtx band.RunCtx, req
 		if role.needsSource && w.source != nil {
 			if digest := w.source.Digest(ctx, runCtx); digest != "" {
 				b.WriteString("REPOSITORY SOURCE (real code snapshot):\n\n")
-				b.WriteString(digest)
+				b.WriteString(sourceDigestForPrompt(req.Agent, digest))
 				b.WriteString("\n\n---\n\n")
 			}
 		}

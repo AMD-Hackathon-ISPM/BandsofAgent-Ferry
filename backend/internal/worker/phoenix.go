@@ -44,6 +44,8 @@ type PhoenixClient struct {
 	joinRef string
 }
 
+const phoenixHeartbeatInterval = 10 * time.Second
+
 func NewPhoenixClient(baseURL, apiKey string) *PhoenixClient {
 	return &PhoenixClient{
 		baseURL: baseURL,
@@ -95,7 +97,7 @@ func (p *PhoenixClient) Run(ctx context.Context) error {
 	hbCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(phoenixHeartbeatInterval)
 		defer ticker.Stop()
 		for {
 			select {

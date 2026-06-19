@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ferry/backend/internal/band"
+	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -103,8 +104,10 @@ func (w *Worker) joinedRooms() []string {
 }
 
 const (
-	reconnectBaseDelay = time.Second
-	reconnectMaxDelay  = 30 * time.Second
+	reconnectBaseDelay      = time.Second
+	reconnectMaxDelay       = 30 * time.Second
+	reconnectSupersedeDelay = 30 * time.Second
+	reconnectStableAfter    = time.Minute
 )
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -150,7 +153,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 
-		attempt = 0
+		connectedAt := time.Now()
 		for _, chatID := range w.joinedRooms() {
 			if err := px.Join("chat_room:" + chatID); err != nil {
 				log.Printf("[%s] rejoin chat_room %s failed: %v", w.info.Key, chatID, err)
@@ -177,6 +180,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		attempt = reconnectAttemptAfterRun(attempt, time.Since(connectedAt))
 		if waitErr := w.waitReconnect(ctx, attempt, err); waitErr != nil {
 			return waitErr
 		}
@@ -243,7 +247,7 @@ func (w *Worker) dispatch(rootCtx, connCtx context.Context, px *PhoenixClient) {
 }
 
 func (w *Worker) waitReconnect(ctx context.Context, attempt int, err error) error {
-	delay := reconnectDelay(attempt)
+	delay := reconnectDelayForError(attempt, err)
 	hinted := retryAfterHint(err)
 	if hinted > delay {
 		delay = hinted
@@ -262,6 +266,25 @@ func (w *Worker) waitReconnect(ctx context.Context, attempt int, err error) erro
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func reconnectDelayForError(attempt int, err error) time.Duration {
+	delay := reconnectDelay(attempt)
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) && closeErr.Code == websocket.CloseNormalClosure && delay < reconnectSupersedeDelay {
+		return reconnectSupersedeDelay
+	}
+	return delay
+}
+
+func reconnectAttemptAfterRun(attempt int, connectedFor time.Duration) int {
+	if attempt < 0 {
+		return 0
+	}
+	if connectedFor >= reconnectStableAfter {
+		return 0
+	}
+	return attempt
 }
 
 func reconnectDelay(attempt int) time.Duration {
@@ -373,7 +396,11 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 	output, err := w.completeStage(ctx, runCtx, prompt)
 	if err != nil {
 		log.Printf("[%s] llm failed: %v", w.info.Key, err)
-		w.releaseStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework) // allow a retry on redelivery
+		if isTerminalStageError(err) {
+			w.markRunTerminal(ctx, runCtx.Run, err.Error())
+		} else {
+			w.releaseStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework) // allow a retry on redelivery
+		}
 		_ = w.client.MarkFailed(ctx, chatID, msg.ID, err.Error())
 		return
 	}
@@ -421,7 +448,7 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 		// the full output in the message so context still flows.
 		content := output
 		if w.role.docOut != "" && w.rdb != nil {
-			content = w.handoffSummary(output, genFiles)
+			content = w.handoffSummary(output, genFiles, runCtx.Rework)
 		}
 		if artifact != "" {
 			content += "\n\n" + artifact
@@ -471,6 +498,23 @@ func (w *Worker) shouldSkipRun(ctx context.Context, runID string) bool {
 // failing migration can't loop the band forever.
 const maxReworks = 2
 
+type terminalStageError struct {
+	err error
+}
+
+func (e terminalStageError) Error() string {
+	return e.err.Error()
+}
+
+func (e terminalStageError) Unwrap() error {
+	return e.err
+}
+
+func isTerminalStageError(err error) bool {
+	var terminal terminalStageError
+	return errors.As(err, &terminal)
+}
+
 // resolveNext picks the downstream agent and the handoff note. Most roles use a
 // static `next`, but the Commander branches on its verdict: NEEDS_REWORK loops
 // back to the Code Generator (until the rework budget is spent) while APPROVED
@@ -499,6 +543,8 @@ func commanderApproved(output string) bool {
 	return !strings.Contains(u, "NEEDS_REWORK") && !strings.Contains(u, "NEEDS REWORK")
 }
 
+const codeGeneratorSourceDigestLimit = 60000
+
 func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, runCtx band.RunCtx, execReport string) string {
 	content := msg.Content
 	for _, m := range msg.Metadata.Mentions {
@@ -514,7 +560,7 @@ func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, run
 	if w.role.needsSource && w.source != nil {
 		if digest := w.source.Digest(ctx, runCtx); digest != "" {
 			b.WriteString("REPOSITORY SOURCE (read this real code before answering):\n\n")
-			b.WriteString(digest)
+			b.WriteString(sourceDigestForPrompt(w.info.Key, digest))
 			b.WriteString("\n\n---\n\n")
 		}
 	}
@@ -542,6 +588,13 @@ func (w *Worker) buildPrompt(ctx context.Context, msg *band.IncomingMessage, run
 	}
 	fmt.Fprintf(&b, "A message addressed to you in the migration band:\n\n%s\n\nProduce your contribution for this stage. Be concise and structured.", content)
 	return b.String()
+}
+
+func sourceDigestForPrompt(agentKey, digest string) string {
+	if agentKey == "code_generator" && len(digest) > codeGeneratorSourceDigestLimit {
+		return digest[:codeGeneratorSourceDigestLimit]
+	}
+	return digest
 }
 
 func extractRoomID(payload json.RawMessage) string {
@@ -621,10 +674,14 @@ func bulletList(items []string) string {
 
 // handoffSummary builds the compact message that replaces the full output when
 // the full text already lives in the shared doc store.
-func (w *Worker) handoffSummary(output string, genFiles map[string]string) string {
+func (w *Worker) handoffSummary(output string, genFiles map[string]string, rework int) string {
 	if w.role.producesFiles {
-		return fmt.Sprintf("%s produced %d file(s). Full details in %s (shared pipeline store).",
-			w.info.Name, len(genFiles), w.role.docOut)
+		verb := "produced"
+		if rework > 0 {
+			verb = "modified"
+		}
+		return fmt.Sprintf("%s %s %d file(s). Full details in %s (shared pipeline store).",
+			w.info.Name, verb, len(genFiles), w.role.docOut)
 	}
 	return headExcerpt(output, 8, 700) + fmt.Sprintf("\n\n(full detail in %s)", w.role.docOut)
 }

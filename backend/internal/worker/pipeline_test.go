@@ -111,6 +111,9 @@ func TestFileManifest(t *testing.T) {
 	if !strings.Contains(got, "rework 2") {
 		t.Fatalf("manifest should note the rework cycle: %s", got)
 	}
+	if !strings.Contains(got, "files modified") {
+		t.Fatalf("rework manifest should say files modified: %s", got)
+	}
 	// Sorted order.
 	if strings.Index(got, "a.go") > strings.Index(got, "b.go") {
 		t.Fatalf("manifest paths should be sorted: %s", got)
@@ -120,12 +123,24 @@ func TestFileManifest(t *testing.T) {
 func TestHandoffSummaryProducesFiles(t *testing.T) {
 	w := newTestWorker("code_generator")
 	w.role = agentRoles["code_generator"]
-	got := w.handoffSummary("...big code output...", map[string]string{"a.go": "x", "b.go": "y"})
+	got := w.handoffSummary("...big code output...", map[string]string{"a.go": "x", "b.go": "y"}, 0)
 	if !strings.Contains(got, "2 file(s)") || !strings.Contains(got, "changes.md") {
 		t.Fatalf("file-producing summary should cite count + doc name: %s", got)
 	}
+	if !strings.Contains(got, "produced") {
+		t.Fatalf("initial file-producing summary should say produced: %s", got)
+	}
 	if strings.Contains(got, "big code output") {
 		t.Fatalf("summary must not embed the raw output: %s", got)
+	}
+}
+
+func TestHandoffSummaryModifiesFilesOnRework(t *testing.T) {
+	w := newTestWorker("code_generator")
+	w.role = agentRoles["code_generator"]
+	got := w.handoffSummary("...big code output...", map[string]string{"a.go": "x"}, 1)
+	if !strings.Contains(got, "modified 1 file(s)") {
+		t.Fatalf("rework file-producing summary should say modified: %s", got)
 	}
 }
 
