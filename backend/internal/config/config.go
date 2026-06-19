@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ferry/backend/internal/guest"
 )
 
 type Config struct {
@@ -23,6 +25,7 @@ type Config struct {
 	CORS     CORSConfig
 	Features FeatureFlags
 	Sandbox  SandboxConfig
+	Guest    GuestConfig
 }
 
 type SandboxConfig struct {
@@ -102,6 +105,8 @@ type ModelConfig struct {
 
 type GitHubConfig struct {
 	PAT          string
+	GuestPAT     string
+	GuestRepos   []string
 	ClientID     string
 	ClientSecret string
 	RedirectURI  string
@@ -129,6 +134,16 @@ type FeatureFlags struct {
 	EnableGitHubIntegration bool
 	EnableRealBand          bool
 	EnableCodeExecution     bool
+	EnableGuestMode         bool
+}
+
+type GuestConfig struct {
+	SessionTTL               time.Duration
+	RateWindow               time.Duration
+	CreationLimitPerIP       int
+	RunCreationLimitPerIP    int
+	ActiveRunLimitPerSession int
+	GlobalRunLimit           int
 }
 
 type APISourceConfig struct {
@@ -313,6 +328,8 @@ func Load() (*Config, error) {
 		},
 		GitHub: GitHubConfig{
 			PAT:           getEnv("GITHUB_PAT", ""),
+			GuestPAT:      getEnv("GITHUB_GUEST_PAT", ""),
+			GuestRepos:    getEnvAsSlice("GUEST_REPOS", nil),
 			ClientID:      getEnv("GITHUB_CLIENT_ID", ""),
 			ClientSecret:  getEnv("GITHUB_CLIENT_SECRET", ""),
 			RedirectURI:   getEnv("GITHUB_REDIRECT_URI", "http://localhost:8080/auth/github/callback"),
@@ -335,6 +352,15 @@ func Load() (*Config, error) {
 			EnableGitHubIntegration: getEnvAsBool("ENABLE_GITHUB_INTEGRATION", true),
 			EnableRealBand:          getEnvAsBool("ENABLE_REAL_BAND", false),
 			EnableCodeExecution:     getEnvAsBool("ENABLE_CODE_EXECUTION", false),
+			EnableGuestMode:         getEnvAsBool("ENABLE_GUEST_MODE", false),
+		},
+		Guest: GuestConfig{
+			SessionTTL:               getEnvAsDuration("GUEST_SESSION_TTL", 24*time.Hour),
+			RateWindow:               getEnvAsDuration("GUEST_RATE_WINDOW", time.Hour),
+			CreationLimitPerIP:       getEnvAsInt("GUEST_CREATION_LIMIT_PER_IP", 10),
+			RunCreationLimitPerIP:    getEnvAsInt("GUEST_RUN_CREATION_LIMIT_PER_IP", 5),
+			ActiveRunLimitPerSession: getEnvAsInt("GUEST_ACTIVE_RUN_LIMIT", 1),
+			GlobalRunLimit:           getEnvAsInt("GUEST_GLOBAL_RUN_LIMIT", 6),
 		},
 		Sandbox: SandboxConfig{
 			RunnerURL: getEnv("RUNNER_URL", ""),
@@ -416,6 +442,17 @@ func (c *Config) Validate() error {
 	}
 	if c.MinIO.SecretKey == "" {
 		return fmt.Errorf("MINIO_SECRET_KEY is required")
+	}
+	if c.Features.EnableGuestMode {
+		if strings.TrimSpace(c.GitHub.GuestPAT) == "" {
+			return fmt.Errorf("GITHUB_GUEST_PAT is required when ENABLE_GUEST_MODE=true")
+		}
+		if _, err := guest.NewRepoPolicy(c.GitHub.GuestRepos); err != nil {
+			return fmt.Errorf("GUEST_REPOS is invalid: %w", err)
+		}
+		if c.Guest.SessionTTL <= 0 || c.Guest.RateWindow <= 0 || c.Guest.CreationLimitPerIP <= 0 || c.Guest.RunCreationLimitPerIP <= 0 || c.Guest.ActiveRunLimitPerSession <= 0 || c.Guest.GlobalRunLimit <= 0 {
+			return fmt.Errorf("guest limits must be positive")
+		}
 	}
 	return nil
 }

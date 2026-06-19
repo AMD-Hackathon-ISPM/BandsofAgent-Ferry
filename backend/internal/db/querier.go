@@ -23,6 +23,7 @@ type Querier interface {
 	CreateAuditLog(ctx context.Context, companyID pgtype.UUID, userID pgtype.UUID, action AuditAction, resourceType *string, resourceID pgtype.UUID, details []byte, ipAddress *netip.Addr, userAgent *string) (AuditLog, error)
 	CreateBandRoom(ctx context.Context, companyID uuid.UUID, migrationRunID uuid.UUID, bandRoomID string, roomName string, roomDescription *string, roomMetadata []byte) (BandRoom, error)
 	CreateCompany(ctx context.Context, name string, slug string, subscriptionTier *string, maxProjects *int32, maxUsers *int32, settings []byte) (Company, error)
+	CreateGuestUser(ctx context.Context, email string) (User, error)
 	CreateMembership(ctx context.Context, companyID uuid.UUID, userID uuid.UUID, role MembershipRole, invitedBy pgtype.UUID, invitedAt pgtype.Timestamptz) (Membership, error)
 	CreateMigrationRun(ctx context.Context, companyID uuid.UUID, projectID uuid.UUID, runNumber int32, status *MigrationStatus, bandRoomID *string, sourceCommitSha *string, targetBranch *string, createdBy uuid.UUID) (MigrationRun, error)
 	CreateProject(ctx context.Context, companyID uuid.UUID, name string, description *string, sourceLanguage SourceLanguage, targetLanguage TargetLanguage, enableDbMigration *bool, githubRepoUrl *string, githubPatEncrypted *string, settings []byte, createdBy uuid.UUID) (Project, error)
@@ -49,6 +50,7 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserMemberships(ctx context.Context, userID uuid.UUID) ([]GetUserMembershipsRow, error)
+	HardDeleteUser(ctx context.Context, id uuid.UUID) error
 	ListAgentMessages(ctx context.Context, companyID uuid.UUID, migrationRunID uuid.UUID, limit int32, offset int32) ([]AgentMessage, error)
 	ListAgentMessagesByPhase(ctx context.Context, companyID uuid.UUID, migrationRunID uuid.UUID, phase MigrationPhase) ([]AgentMessage, error)
 	ListAuditLogs(ctx context.Context, companyID pgtype.UUID, limit int32, offset int32) ([]AuditLog, error)

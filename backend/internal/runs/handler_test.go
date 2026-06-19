@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	ghpkg "github.com/ferry/backend/internal/github"
+	"github.com/ferry/backend/internal/guest"
 	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/google/uuid"
 )
@@ -31,11 +32,35 @@ func TestGetArtifactContentReturnsNotFoundWhenStorageUnavailable(t *testing.T) {
 	}
 }
 
+func TestCreateRunRejectsDisallowedGuestRepoBeforeProjectLookup(t *testing.T) {
+	companyID := uuid.New()
+	userID := uuid.New()
+	policy, err := guest.NewRepoPolicy([]string{"ferrymigrator/allowed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(nil, nil, nil, nil, nil, nil, nil)
+	handler.guestPolicy = policy
+
+	req := httptest.NewRequest(http.MethodPost, "/api/runs", bytes.NewBufferString(`{"repo":"someone/private","branch":"main","sourceLanguage":"java","targetLanguage":"go"}`))
+	ctx := context.WithValue(req.Context(), middleware.CompanyIDKey, companyID.String())
+	ctx = context.WithValue(ctx, middleware.UserIDKey, userID.String())
+	ctx = context.WithValue(ctx, middleware.IsGuestKey, true)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.CreateRun(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
 func TestCreateRunRejectsInaccessibleRepoBeforeProjectLookup(t *testing.T) {
 	companyID := uuid.New()
 	userID := uuid.New()
 	handler := NewHandler(nil, nil, nil, nil, nil, nil, nil)
-	handler.validateRepoAccess = func(context.Context, string, string) error {
+	handler.validateRepoAccess = func(context.Context, string, string, bool) error {
 		return ghpkg.ErrNotFound
 	}
 

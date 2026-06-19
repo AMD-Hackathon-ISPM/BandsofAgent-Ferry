@@ -300,7 +300,8 @@ function SuccessProbabilityCards({ level }: { level: MigrationRisk["level"] }) {
 
 export function RepoLauncher({ className }: { className?: string }) {
   const navigate = useNavigate()
-  const { accessToken } = useAuth()
+  const { accessToken, user } = useAuth()
+  const isGuest = user?.isGuest === true
   const [input, setInput] = React.useState("")
   const [repoMenuOpen, setRepoMenuOpen] = React.useState(false)
   const [suggestions, setSuggestions] = React.useState<RepoSuggestion[]>([])
@@ -396,9 +397,13 @@ export function RepoLauncher({ className }: { className?: string }) {
       setSource(result.repo.detectedLanguage)
       setReason(null)
       setPhase("resolved")
+      if (isGuest) {
+        setInstallState("installed")
+      } else {
       loadInstall(result.repo)
+      }
     },
-    [accessToken, loadInstall]
+    [accessToken, isGuest, loadInstall]
   )
 
   const repoOptions = React.useMemo(() => {
@@ -410,10 +415,11 @@ export function RepoLauncher({ className }: { className?: string }) {
   }, [input, suggestions])
 
   React.useEffect(() => {
+    if (isGuest) return
     if (!input.trim()) return
     const id = window.setTimeout(() => run(input), 600)
     return () => window.clearTimeout(id)
-  }, [input, run])
+  }, [input, isGuest, run])
 
   React.useEffect(() => {
     function closeOnOutsideClick(event: PointerEvent) {
@@ -434,7 +440,13 @@ export function RepoLauncher({ className }: { className?: string }) {
   }
 
   const launch = async () => {
-    if (!repo || !accessToken || launching || installState === "needed") return
+    if (
+      !repo ||
+      !accessToken ||
+      launching ||
+      (!isGuest && installState === "needed")
+    )
+      return
     setLaunching(true)
     try {
       const result = await createRun(
@@ -461,11 +473,12 @@ export function RepoLauncher({ className }: { className?: string }) {
 
   // After the user installs in the GitHub tab and returns, re-check on focus.
   React.useEffect(() => {
+    if (isGuest) return
     if (installState !== "needed" || !repo) return
     const onFocus = () => loadInstall(repo)
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
-  }, [installState, repo, loadInstall])
+  }, [installState, isGuest, repo, loadInstall])
 
   const dbAvailable = repo?.dbMigration?.available ?? true
   const dbLabel = repo?.dbMigration?.label ?? "MyISAM to InnoDB"
@@ -490,7 +503,45 @@ export function RepoLauncher({ className }: { className?: string }) {
       <div className="p-4">
         <FieldGroup>
           <Field data-invalid={invalid || undefined}>
-            <FieldLabel htmlFor="repo-url">Repository URL</FieldLabel>
+            <FieldLabel htmlFor={isGuest ? "guest-repo" : "repo-url"}>
+              {isGuest ? "Repository" : "Repository URL"}
+            </FieldLabel>
+            {isGuest ? (
+              <Select
+                value={selectedRepoFullName}
+                onValueChange={(value) => {
+                  const option = suggestions.find(
+                    (item) => item.fullName === value
+                  )
+                  if (option) selectRepo(option)
+                }}
+                disabled={suggestionsLoading}
+              >
+                <SelectTrigger id="guest-repo" className="w-full font-mono">
+                  <SelectValue
+                    placeholder={
+                      suggestionsLoading
+                        ? "Loading repositories..."
+                        : "Select a repository"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {suggestions.map((repoOption) => (
+                      <SelectItem
+                        key={repoOption.fullName}
+                        value={repoOption.fullName}
+                        disabled={!repoOption.risk.selectable}
+                        className="font-mono"
+                      >
+                        {repoOption.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            ) : (
             <div ref={pickerRef} className="relative">
               <InputGroup>
                 <InputGroupInput
@@ -639,6 +690,7 @@ export function RepoLauncher({ className }: { className?: string }) {
                 </div>
               )}
             </div>
+            )}
             {phase === "error" && reason && (
               <FieldError>
                 {ERROR_COPY[reason]}
@@ -767,7 +819,7 @@ export function RepoLauncher({ className }: { className?: string }) {
                 </div>
               </div>
 
-              {installState === "needed" ? (
+              {!isGuest && installState === "needed" ? (
                 <div className="flex flex-col gap-2 border border-warning/35 bg-warning/10 p-3">
                   <p className="text-xs text-warning">
                     Ferry needs write access to open the pull request. Install

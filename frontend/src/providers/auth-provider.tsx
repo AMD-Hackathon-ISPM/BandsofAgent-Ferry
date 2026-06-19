@@ -19,12 +19,16 @@ interface StoredSession {
 }
 
 type AuthStatus = "idle" | "authenticating" | "authenticated"
+type AuthMethod = "github" | "guest"
 
 interface AuthState {
   user: User | null
   accessToken: string | null
   status: AuthStatus
+  authMethod: AuthMethod | null
+  error: string | null
   beginGitHub: () => void
+  beginGuest: () => Promise<void>
   completeGitHub: (session: StoredSession) => void
   signOut: () => void
   setRole: (role: Role) => void
@@ -74,6 +78,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = React.useState<AuthStatus>(() =>
     session ? "authenticated" : "idle",
   )
+  const [authMethod, setAuthMethod] = React.useState<AuthMethod | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
 
   const persist = React.useCallback((next: StoredSession | null) => {
     if (next) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
@@ -81,10 +87,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const beginGitHub = React.useCallback(() => {
+    setError(null)
+    setAuthMethod("github")
     if (USE_DUMMY_DATA) {
       const next = createDummySession()
       setSession(next)
       setStatus("authenticated")
+      setAuthMethod(null)
       persist(next)
       return
     }
@@ -96,14 +105,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (newSession: StoredSession) => {
       setSession(newSession)
       setStatus("authenticated")
+      setAuthMethod(null)
+      setError(null)
       persist(newSession)
     },
     [persist],
   )
 
+  const beginGuest = React.useCallback(async () => {
+    setError(null)
+    setAuthMethod("guest")
+    setStatus("authenticating")
+    if (USE_DUMMY_DATA) {
+      completeGitHub({
+        user: {
+          id: "guest",
+          name: "Guest",
+          handle: "guest",
+          email: "guest@gmail.com",
+          role: "owner",
+          isGuest: true,
+        },
+        accessToken: DUMMY_ACCESS_TOKEN,
+        refreshToken: DUMMY_REFRESH_TOKEN,
+      })
+      return
+    }
+    try {
+      const response = await fetch(`${API_URL}/auth/guest`, {
+        method: "POST",
+        cache: "no-store",
+      })
+      if (!response.ok) {
+        throw new Error(
+          response.status === 429
+            ? "Guest access is temporarily rate limited."
+            : "Guest access is unavailable."
+        )
+      }
+      completeGitHub((await response.json()) as StoredSession)
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Guest access is unavailable."
+      setStatus("idle")
+      setAuthMethod(null)
+      setError(message)
+      throw cause
+    }
+  }, [completeGitHub])
+
   const signOut = React.useCallback(() => {
     setSession(null)
     setStatus("idle")
+    setAuthMethod(null)
+    setError(null)
     persist(null)
   }, [persist])
 
@@ -134,12 +189,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       accessToken: session?.accessToken ?? null,
       status,
+      authMethod,
+      error,
       beginGitHub,
+      beginGuest,
       completeGitHub,
       signOut,
       setRole,
     }),
-    [session, status, beginGitHub, completeGitHub, signOut, setRole],
+    [
+      session,
+      status,
+      authMethod,
+      error,
+      beginGitHub,
+      beginGuest,
+      completeGitHub,
+      signOut,
+      setRole,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

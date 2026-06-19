@@ -15,6 +15,7 @@ import (
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/db"
 	ghpkg "github.com/ferry/backend/internal/github"
+	"github.com/ferry/backend/internal/guest"
 	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/ferry/backend/internal/scheduler"
 	"github.com/ferry/backend/internal/storage"
@@ -34,16 +35,40 @@ type Handler struct {
 	sched              *scheduler.Scheduler
 	blobs              *storage.MinIOClient
 	validateRepoAccess repoAccessValidator
+	guestPolicy        *guest.RepoPolicy
+	guestAdmission     *guest.Admission
 }
 
-type repoAccessValidator func(context.Context, string, string) error
+type repoAccessValidator func(context.Context, string, string, bool) error
 
 func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service, sched *scheduler.Scheduler, blobs *storage.MinIOClient, ghTokens ...*ghpkg.UserTokens) *Handler {
 	h := &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc, sched: sched, blobs: blobs}
 	if len(ghTokens) > 0 && ghTokens[0] != nil {
-		h.validateRepoAccess = gitHubRepoAccessValidator(ghTokens[0])
+		h.validateRepoAccess = gitHubRepoAccessValidator(ghTokens[0], "")
 	}
 	return h
+}
+
+func (h *Handler) ConfigureGuest(policy *guest.RepoPolicy, admission *guest.Admission, guestPAT string) {
+	h.guestPolicy = policy
+	h.guestAdmission = admission
+	if h.validateRepoAccess != nil {
+		existing := h.validateRepoAccess
+		h.validateRepoAccess = func(ctx context.Context, userID, repo string, isGuest bool) error {
+			if !isGuest {
+				return existing(ctx, userID, repo, false)
+			}
+			owner, name := repoOwnerName(repo)
+			if owner == "" || name == "" {
+				return ghpkg.ErrNotFound
+			}
+			if guestPAT == "" {
+				return ghpkg.ErrGuestCredentialsUnavailable
+			}
+			_, err := ghpkg.NewClient(guestPAT).ResolveRepo(ctx, owner, name)
+			return err
+		}
+	}
 }
 
 type projectVM struct {
@@ -186,13 +211,20 @@ func repoOwnerName(repoURL string) (owner, name string) {
 	return "", clean
 }
 
-func gitHubRepoAccessValidator(tokens *ghpkg.UserTokens) repoAccessValidator {
-	return func(ctx context.Context, userID, repo string) error {
+func gitHubRepoAccessValidator(tokens *ghpkg.UserTokens, guestPAT string) repoAccessValidator {
+	return func(ctx context.Context, userID, repo string, isGuest bool) error {
 		owner, name := repoOwnerName(repo)
 		if owner == "" || name == "" {
 			return ghpkg.ErrNotFound
 		}
-		_, err := ghpkg.NewClient(tokens.Token(ctx, userID)).ResolveRepo(ctx, owner, name)
+		token := tokens.Token(ctx, userID)
+		if isGuest {
+			token = guestPAT
+			if token == "" {
+				return ghpkg.ErrGuestCredentialsUnavailable
+			}
+		}
+		_, err := ghpkg.NewClient(token).ResolveRepo(ctx, owner, name)
 		return err
 	}
 }
@@ -516,10 +548,28 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	isGuest := middleware.IsGuest(r.Context())
+	if isGuest && !h.guestPolicy.Allowed(req.Repo) {
+		writeError(w, http.StatusForbidden, "repository is not available to guests")
+		return
+	}
+	var release func()
+	if isGuest {
+		release, err = h.guestAdmission.AdmitRun(r.Context(), companyID.String(), guest.ClientIP(r))
+		if err != nil {
+			writeGuestAdmissionError(w, err)
+			return
+		}
+		defer release()
+	}
 	if h.validateRepoAccess != nil {
-		if err := h.validateRepoAccess(r.Context(), userID.String(), req.Repo); err != nil {
+		if err := h.validateRepoAccess(r.Context(), userID.String(), req.Repo, isGuest); err != nil {
 			if errors.Is(err, ghpkg.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "repository not found")
+				return
+			}
+			if errors.Is(err, ghpkg.ErrGuestCredentialsUnavailable) {
+				writeError(w, http.StatusServiceUnavailable, "guest GitHub access is unavailable")
 				return
 			}
 			writeError(w, http.StatusBadGateway, "failed to reach GitHub")
@@ -579,6 +629,13 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusNotFound, "run not found")
 		return
+	}
+	if middleware.IsGuest(r.Context()) {
+		repo, repoErr := h.repoForRun(r.Context(), companyID, runID)
+		if repoErr != nil || !h.guestPolicy.Allowed(repo) {
+			writeError(w, http.StatusForbidden, "repository is not available to guests")
+			return
+		}
 	}
 	if existing.Status != nil && *existing.Status != db.MigrationStatusPending {
 		writeError(w, http.StatusConflict, "run is not in pending state")
@@ -640,13 +697,29 @@ func (h *Handler) RerunRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "run not found")
 		return
 	}
+	isGuest := middleware.IsGuest(r.Context())
+	if isGuest {
+		repo, repoErr := h.repoForRun(r.Context(), companyID, runID)
+		if repoErr != nil || !h.guestPolicy.Allowed(repo) {
+			writeError(w, http.StatusForbidden, "repository is not available to guests")
+			return
+		}
+	}
+	var release func()
+	if isGuest {
+		release, err = h.guestAdmission.AdmitRun(r.Context(), companyID.String(), guest.ClientIP(r))
+		if err != nil {
+			writeGuestAdmissionError(w, err)
+			return
+		}
+		defer release()
+	}
 
 	runNumber, err := h.q.GetNextRunNumber(r.Context(), companyID, original.ProjectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get run number")
 		return
 	}
-
 	s := db.MigrationStatusPending
 	newRun, err := h.q.CreateMigrationRun(r.Context(), companyID, original.ProjectID, runNumber, &s, nil, nil, original.TargetBranch, userID)
 	if err != nil {
@@ -685,7 +758,6 @@ func (h *Handler) ApproveDbPlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid run id")
 		return
 	}
-
 	_, err = h.pool.Exec(r.Context(),
 		`UPDATE db_migration_plans SET approved_by = $1, approved_at = NOW() WHERE company_id = $2 AND migration_run_id = $3`,
 		userID, companyID, runID,
@@ -696,6 +768,30 @@ func (h *Handler) ApproveDbPlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"approved": true})
+}
+
+func (h *Handler) repoForRun(ctx context.Context, companyID, runID uuid.UUID) (string, error) {
+	var repo string
+	err := h.pool.QueryRow(ctx, `
+		SELECT COALESCE(p.github_repo_url, '')
+		FROM migration_runs mr
+		JOIN projects p ON p.id = mr.project_id AND p.company_id = mr.company_id
+		WHERE mr.company_id = $1 AND mr.id = $2
+	`, companyID, runID).Scan(&repo)
+	return repo, err
+}
+
+func writeGuestAdmissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, guest.ErrRateLimited):
+		writeError(w, http.StatusTooManyRequests, "guest run creation rate limit exceeded")
+	case errors.Is(err, guest.ErrSessionCap):
+		writeError(w, http.StatusConflict, "guest session already has an active run")
+	case errors.Is(err, guest.ErrGlobalCap):
+		writeError(w, http.StatusServiceUnavailable, "guest run queue is full")
+	default:
+		writeError(w, http.StatusServiceUnavailable, "guest run admission is unavailable")
+	}
 }
 
 func (h *Handler) GetArtifactContent(w http.ResponseWriter, r *http.Request) {
@@ -768,6 +864,16 @@ func (h *Handler) StreamRun(w http.ResponseWriter, r *http.Request) {
 	runID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, "invalid run id", http.StatusBadRequest)
+		return
+	}
+	companyID, err := uuid.Parse(claims.CompanyID)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var owned bool
+	if err := h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM migration_runs WHERE id = $1 AND company_id = $2)`, runID, companyID).Scan(&owned); err != nil || !owned {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 

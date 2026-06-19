@@ -8,6 +8,7 @@ import (
 
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/github"
+	"github.com/ferry/backend/internal/guest"
 )
 
 type SourceProvider struct {
@@ -15,10 +16,12 @@ type SourceProvider struct {
 	app    *github.App        // GitHub App, for minting per-repo installation tokens; nil if unconfigured
 	mu     sync.Mutex
 	cache  map[string]string
+	guestPAT    string
+	guestPolicy *guest.RepoPolicy
 }
 
-func NewSourceProvider(tokens *github.UserTokens, app *github.App) *SourceProvider {
-	return &SourceProvider{tokens: tokens, app: app, cache: make(map[string]string)}
+func NewSourceProvider(tokens *github.UserTokens, app *github.App, guestPAT string, guestPolicy *guest.RepoPolicy) *SourceProvider {
+	return &SourceProvider{tokens: tokens, app: app, cache: make(map[string]string), guestPAT: guestPAT, guestPolicy: guestPolicy}
 }
 
 func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
@@ -38,7 +41,11 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 	}
 	s.mu.Unlock()
 
-	gh := github.NewClient(s.tokens.Token(ctx, rc.User))
+	token := s.Token(ctx, rc.User, rc.Repo, rc.IsGuest)
+	if rc.IsGuest && token == "" {
+		return ""
+	}
+	gh := github.NewClient(token)
 	digest, err := gh.FetchSourceDigest(ctx, owner, name, rc.Branch, rc.Src)
 	if err != nil {
 		log.Printf("source fetch failed for %s: %v", rc.Repo, err)
@@ -57,7 +64,13 @@ func digestCacheKey(rc band.RunCtx) string {
 
 // Token resolves the GitHub token for read operations. The user's OAuth token
 // keeps repository discovery aligned with what they can see in the UI.
-func (s *SourceProvider) Token(ctx context.Context, userID string) string {
+func (s *SourceProvider) Token(ctx context.Context, userID, repo string, isGuest bool) string {
+	if isGuest {
+		if !s.guestPolicy.Allowed(repo) {
+			return ""
+		}
+		return s.guestPAT
+	}
 	return s.tokens.Token(ctx, userID)
 }
 
@@ -66,7 +79,7 @@ func (s *SourceProvider) Token(ctx context.Context, userID string) string {
 // repo — the preferred, no-PAT path that works once the user has installed the
 // App; (2) the run creator's login token; (3) the operator PAT. The caller
 // tries each in turn, so a credential without write access falls through.
-func (s *SourceProvider) WriteTokens(ctx context.Context, userID, owner, repo string) []string {
+func (s *SourceProvider) WriteTokens(ctx context.Context, userID, owner, repo string, isGuest bool) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(t string) {
@@ -75,12 +88,19 @@ func (s *SourceProvider) WriteTokens(ctx context.Context, userID, owner, repo st
 			out = append(out, t)
 		}
 	}
+	if isGuest && (!s.guestPolicy.Allowed(owner+"/"+repo) || s.guestPAT == "") {
+		return out
+	}
 	if s.app != nil {
 		if t, err := s.app.InstallationToken(ctx, owner, repo); err == nil {
 			add(t)
 		} else {
 			log.Printf("github app installation token unavailable for %s/%s: %v", owner, repo, err)
 		}
+	}
+	if isGuest {
+		add(s.guestPAT)
+		return out
 	}
 	add(s.tokens.LoginToken(ctx, userID)) // user's GitHub token, re-minted if expired
 	add(s.tokens.PAT())                   // operator fallback

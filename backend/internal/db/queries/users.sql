@@ -3,6 +3,11 @@ INSERT INTO users (email, password_hash, full_name, avatar_url)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
 
+-- name: CreateGuestUser :one
+INSERT INTO users (email, password_hash, full_name, is_guest)
+VALUES ($1, '', 'Guest', true)
+RETURNING *;
+
 -- name: GetUserByID :one
 SELECT * FROM users
 WHERE id = $1 AND deleted_at IS NULL;
@@ -36,4 +41,8 @@ WHERE id = $1;
 UPDATE users
 SET deleted_at = NOW()
 WHERE id = $1;
+
+-- name: HardDeleteUser :exec
+DELETE FROM users
+WHERE id = $1 AND is_guest = true;
 

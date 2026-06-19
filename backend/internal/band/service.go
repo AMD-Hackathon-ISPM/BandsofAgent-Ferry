@@ -83,6 +83,13 @@ func (s *Service) ListTranscriptMessages(ctx context.Context, roomID string) ([]
 	return s.client.ListMessages(ctx, roomID)
 }
 
+func (s *Service) DeleteChat(ctx context.Context, chatID string) error {
+	if s.client == nil || chatID == "" {
+		return nil
+	}
+	return s.client.DeleteChat(ctx, chatID)
+}
+
 func (s *Service) AgentKeyByID(id string) string {
 	for _, a := range s.roster() {
 		if a.ID == id {

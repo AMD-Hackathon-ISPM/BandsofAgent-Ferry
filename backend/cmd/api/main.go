@@ -20,6 +20,8 @@ import (
 	"github.com/ferry/backend/internal/db"
 	ferrypkg "github.com/ferry/backend/internal/ferry"
 	ghpkg "github.com/ferry/backend/internal/github"
+	"github.com/ferry/backend/internal/guest"
+	"github.com/ferry/backend/internal/guestcleanup"
 	"github.com/ferry/backend/internal/http/middleware"
 	migratepkg "github.com/ferry/backend/internal/migrate"
 	runspkg "github.com/ferry/backend/internal/runs"
@@ -59,7 +61,16 @@ func main() {
 		"ferry",
 	)
 	hasher := auth.NewPasswordHasher()
-	authService := auth.NewService(queries, jwtManager, hasher)
+	authService := auth.NewService(queries, jwtManager, hasher, pool)
+	var guestPolicy *guest.RepoPolicy
+	var guestAdmission *guest.Admission
+	if cfg.Features.EnableGuestMode {
+		guestPolicy, err = guest.NewRepoPolicy(cfg.GitHub.GuestRepos)
+		if err != nil {
+			log.Fatalf("failed to configure guest repository policy: %v", err)
+		}
+		guestAdmission = guest.NewAdmission(pool, rdb, cfg.Guest.RateWindow, cfg.Guest.CreationLimitPerIP, cfg.Guest.RunCreationLimitPerIP, cfg.Guest.ActiveRunLimitPerSession, cfg.Guest.GlobalRunLimit)
+	}
 
 	ghHandler := auth.NewGitHubHandler(auth.GitHubOAuthConfig{
 		ClientID:     cfg.GitHub.ClientID,
@@ -77,7 +88,7 @@ func main() {
 		log.Printf("github app enabled (id %s)", cfg.GitHub.AppID)
 	}
 	ghTokens := ghpkg.NewUserTokens(rdb, cfg.GitHub.ClientID, cfg.GitHub.ClientSecret, cfg.GitHub.PAT)
-	ghAPIHandler := ghpkg.NewHandler(ghTokens, ghApp)
+	ghAPIHandler := ghpkg.NewHandler(ghTokens, ghApp, cfg.GitHub.GuestPAT, guestPolicy)
 
 	bandService, err := band.NewService(&cfg.Band)
 	if err != nil {
@@ -86,7 +97,7 @@ func main() {
 
 	// Run scheduler: admits up to N concurrent runs (N = provider key-pool size),
 	// queues the rest in Redis, and admits queued runs as slots free.
-	sched := scheduler.New(pool, queries, rdb, bandService, cfg.Agents.Slots(), 0)
+	sched := scheduler.New(pool, queries, rdb, bandService, cfg.Agents.Slots(), 0, guestPolicy)
 	go sched.Run(context.Background())
 	log.Printf("run scheduler: %d concurrency slot(s)", cfg.Agents.Slots())
 
@@ -102,12 +113,17 @@ func main() {
 	}
 
 	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService, sched, artifactStore, ghTokens)
-	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents, sched)
+	runsHandler.ConfigureGuest(guestPolicy, guestAdmission, cfg.GitHub.GuestPAT)
+	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents, sched, guestPolicy, guestAdmission)
 
 	// Mirror Band chat transcripts into agent_messages + Redis so the run
 	// timeline + SSE surface the agent collaboration in the frontend.
 	if mirror := bandmirror.New(pool, rdb, cfg, artifactStore); mirror != nil {
 		go mirror.Run(context.Background())
+	}
+	if cfg.Features.EnableGuestMode {
+		cleaner := guestcleanup.New(pool, rdb, artifactStore, bandService, cfg.GitHub.GuestPAT, guestPolicy, cfg.Guest.SessionTTL)
+		go cleaner.Run(context.Background())
 	}
 
 	mux := http.NewServeMux()
@@ -118,6 +134,10 @@ func main() {
 	mux.HandleFunc("/auth/github", ghHandler.HandleBegin)
 	mux.HandleFunc("/auth/github/callback", ghHandler.HandleCallback)
 	mux.HandleFunc("/auth/github/setup", ghHandler.HandleSetup)
+	if cfg.Features.EnableGuestMode {
+		guestHandler := auth.NewGuestHandler(authService, guestAdmission)
+		mux.HandleFunc("POST /auth/guest", guestHandler.Login)
+	}
 
 	// Token refresh — public (authenticates via the refresh token), lets the
 	// frontend recover an expired 15m access token without forcing re-login.

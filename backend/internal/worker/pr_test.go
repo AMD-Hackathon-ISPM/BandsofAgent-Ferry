@@ -40,3 +40,11 @@ func TestPullRequestArtifactRoundTrip(t *testing.T) {
 		t.Fatalf("artifact body = %#v, want %#v", got, result)
 	}
 }
+
+func TestMigrationBranchUsesFullRunID(t *testing.T) {
+	runID := "8bb8276a-8d6d-4b02-9ea8-7d4dfc32c8af"
+	want := "ferry-migration-" + runID
+	if got := migrationBranch(runID); got != want {
+		t.Fatalf("migrationBranch() = %q, want %q", got, want)
+	}
+}

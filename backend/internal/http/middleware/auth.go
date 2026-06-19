@@ -15,6 +15,7 @@ const (
 	CompanyIDKey contextKey = "companyId"
 	EmailKey     contextKey = "email"
 	RoleKey      contextKey = "role"
+	IsGuestKey   contextKey = "isGuest"
 )
 
 type AuthMiddleware struct {
@@ -57,6 +58,7 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, CompanyIDKey, claims.CompanyID)
 		ctx = context.WithValue(ctx, EmailKey, claims.Email)
 		ctx = context.WithValue(ctx, RoleKey, claims.Role)
+		ctx = context.WithValue(ctx, IsGuestKey, claims.IsGuest)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -88,4 +90,9 @@ func GetRole(ctx context.Context) string {
 		return role
 	}
 	return ""
+}
+
+func IsGuest(ctx context.Context) bool {
+	isGuest, _ := ctx.Value(IsGuestKey).(bool)
+	return isGuest
 }

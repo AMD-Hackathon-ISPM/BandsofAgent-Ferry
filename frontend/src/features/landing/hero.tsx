@@ -1,14 +1,18 @@
 import { IconArrowDown, IconLock } from "@tabler/icons-react"
+import { useNavigate } from "react-router-dom"
 
 import { getRun } from "@/lib/mock/data"
 import { useMediaQuery } from "@/lib/hooks"
 import { VoyageView } from "@/features/voyage/voyage-view"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/providers/auth-provider"
 import { StartMigrationButton } from "./cta"
 
 const EMPTY_IDS = new Set<string>()
 
 export function Hero() {
+  const { beginGuest } = useAuth()
+  const navigate = useNavigate()
   const run = getRun("run_7")!
   const isDesktop = useMediaQuery("(min-width: 1024px)")
 
@@ -53,7 +57,7 @@ export function Hero() {
           </p>
 
           <h1 className="mt-5 text-[clamp(2.5rem,6vw,5.25rem)] leading-[0.98] pixel-heading text-balance text-foreground">
-            Ferry your legacy code to a modern shore.
+            Ferry your legacy code to a <span className="text-primary-bright">modern shore</span>.
           </h1>
 
           <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
@@ -63,7 +67,15 @@ export function Hero() {
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
-            <StartMigrationButton size="lg" className="px-3.5" withArrow />
+            <StartMigrationButton
+              size="lg"
+              className="px-3.5"
+              withArrow
+              onGuest={async () => {
+                await beginGuest()
+                navigate("/app")
+              }}
+            />
             <Button asChild size="lg" variant="outline" className="px-3.5">
               <a href="#demo">
                 <IconArrowDown data-icon="inline-start" />

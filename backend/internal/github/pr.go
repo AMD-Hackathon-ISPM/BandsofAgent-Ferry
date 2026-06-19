@@ -85,14 +85,11 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 		return "", 0, fmt.Errorf("create commit: %w", err)
 	}
 
-	// 5. Create the branch (force-update if it already exists).
+	// 5. Create the branch.
 	err := c.send(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo),
 		map[string]string{"ref": "refs/heads/" + head, "sha": commit.SHA}, nil)
 	if err != nil {
-		if uErr := c.send(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, head),
-			map[string]interface{}{"sha": commit.SHA, "force": true}, nil); uErr != nil {
-			return "", 0, fmt.Errorf("create/update branch: %w", err)
-		}
+		return "", 0, fmt.Errorf("create branch: %w", err)
 	}
 
 	// 6. Open the PR.
@@ -106,6 +103,17 @@ func (c *Client) OpenPullRequest(ctx context.Context, owner, repo, base, head, t
 		return "", 0, fmt.Errorf("open pull request: %w", err)
 	}
 	return pr.HTMLURL, pr.Number, nil
+}
+
+func (c *Client) ClosePullRequest(ctx context.Context, owner, repo string, number int) error {
+	if number <= 0 {
+		return nil
+	}
+	return c.send(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number), map[string]string{"state": "closed"}, nil)
+}
+
+func (c *Client) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
+	return c.send(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, branch), nil, nil)
 }
 
 // send performs an authenticated JSON request against the GitHub API.

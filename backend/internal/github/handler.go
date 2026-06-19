@@ -7,20 +7,31 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ferry/backend/internal/guest"
 	"github.com/ferry/backend/internal/http/middleware"
 )
+
+var ErrGuestCredentialsUnavailable = errors.New("guest GitHub credentials unavailable")
 
 type Handler struct {
 	tokens *UserTokens
 	app    *App
+	guestPAT    string
+	guestPolicy *guest.RepoPolicy
 }
 
-func NewHandler(tokens *UserTokens, app *App) *Handler {
-	return &Handler{tokens: tokens, app: app}
+func NewHandler(tokens *UserTokens, app *App, guestPAT string, guestPolicy *guest.RepoPolicy) *Handler {
+	return &Handler{tokens: tokens, app: app, guestPAT: guestPAT, guestPolicy: guestPolicy}
 }
 
-func (h *Handler) clientForUser(ctx context.Context, userID string) *Client {
-	return NewClient(h.tokens.Token(ctx, userID))
+func (h *Handler) clientForUser(ctx context.Context, userID string) (*Client, error) {
+	if middleware.IsGuest(ctx) {
+		if h.guestPAT == "" {
+			return nil, ErrGuestCredentialsUnavailable
+		}
+		return NewClient(h.guestPAT), nil
+	}
+	return NewClient(h.tokens.Token(ctx, userID)), nil
 }
 
 func (h *Handler) ResolveRepo(w http.ResponseWriter, r *http.Request) {
@@ -32,8 +43,16 @@ func (h *Handler) ResolveRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid repo format, expected owner/name")
 		return
 	}
+	if middleware.IsGuest(r.Context()) && !h.guestPolicy.Allowed(repoParam) {
+		writeError(w, http.StatusForbidden, "repository is not available to guests")
+		return
+	}
 
-	client := h.clientForUser(r.Context(), userID)
+	client, err := h.clientForUser(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "guest GitHub access is unavailable")
+		return
+	}
 	info, err := client.ResolveRepo(r.Context(), parts[0], parts[1])
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -49,7 +68,27 @@ func (h *Handler) ResolveRepo(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListSuggestions(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
-	client := h.clientForUser(r.Context(), userID)
+	client, err := h.clientForUser(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "guest GitHub access is unavailable")
+		return
+	}
+	if middleware.IsGuest(r.Context()) {
+		suggestions := make([]RepoSuggestion, 0, len(h.guestPolicy.Repos()))
+		for _, fullName := range h.guestPolicy.Repos() {
+			parts := strings.SplitN(fullName, "/", 2)
+			info, resolveErr := client.ResolveRepo(r.Context(), parts[0], parts[1])
+			if resolveErr != nil {
+				continue
+			}
+			suggestions = append(suggestions, RepoSuggestion{
+				FullName: info.Owner + "/" + info.Name, DetectedLanguage: info.DetectedLanguage,
+				DetectedLabel: info.DetectedLabel, Risk: info.Risk, Languages: info.Languages,
+			})
+		}
+		writeJSON(w, http.StatusOK, suggestions)
+		return
+	}
 
 	suggestions, err := client.ListUserRepos(r.Context())
 	if err != nil || len(suggestions) == 0 {
@@ -70,6 +109,10 @@ func (h *Handler) AppInstallation(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(repoParam, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		writeError(w, http.StatusBadRequest, "invalid repo format, expected owner/name")
+		return
+	}
+	if middleware.IsGuest(r.Context()) && !h.guestPolicy.Allowed(repoParam) {
+		writeError(w, http.StatusForbidden, "repository is not available to guests")
 		return
 	}
 

@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom"
-import { IconBrandGithub, IconLock } from "@tabler/icons-react"
+import { IconBrandGithub, IconLock, IconUser } from "@tabler/icons-react"
 
 import { AGENT_ORDER } from "@/lib/domain"
 import { getRun } from "@/lib/mock/data"
@@ -80,7 +80,7 @@ function LoginPreview() {
 }
 
 export function Login() {
-  const { user, status, beginGitHub } = useAuth()
+  const { user, status, authMethod, error, beginGitHub, beginGuest } = useAuth()
   const location = useLocation()
   useDocumentTitle("Ferry · Sign In")
   const from = (location.state as { from?: string } | null)?.from ?? "/app"
@@ -108,8 +108,14 @@ export function Login() {
             step.
           </p>
 
-          <Button onClick={signIn} disabled={authenticating} size="lg" className="mt-7 w-full sm:w-auto">
-            {authenticating ? (
+          <div className="mt-7 flex flex-col gap-2 sm:flex-row">
+            <Button
+              onClick={signIn}
+              disabled={authenticating}
+              size="lg"
+              className="w-full sm:w-auto"
+            >
+              {authMethod === "github" ? (
               <>
                 <Spinner data-icon="inline-start" />
                 Opening GitHub
@@ -121,6 +127,27 @@ export function Login() {
               </>
             )}
           </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-full sm:w-auto"
+              disabled={authenticating}
+              onClick={() => void beginGuest().catch(() => undefined)}
+            >
+              {authMethod === "guest" ? (
+                <>
+                  <Spinner data-icon="inline-start" />
+                  Starting guest session
+                </>
+              ) : (
+                <>
+                  <IconUser data-icon="inline-start" />
+                  Try as guest
+                </>
+              )}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
 
           <p className="mt-5 flex items-start gap-2 text-xs leading-relaxed text-muted-foreground/70">
             <IconLock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />

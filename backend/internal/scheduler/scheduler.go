@@ -14,6 +14,7 @@ import (
 
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/db"
+	"github.com/ferry/backend/internal/guest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -39,16 +40,21 @@ type Scheduler struct {
 	staleAfter time.Duration
 
 	mu sync.Mutex // serializes slot allocation (single api instance)
+	guestPolicy *guest.RepoPolicy
 }
 
-func New(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, bandSvc *band.Service, slots int, staleAfter time.Duration) *Scheduler {
+func New(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, bandSvc *band.Service, slots int, staleAfter time.Duration, policies ...*guest.RepoPolicy) *Scheduler {
 	if slots < 1 {
 		slots = 1
 	}
 	if staleAfter <= 0 {
 		staleAfter = 30 * time.Minute
 	}
-	return &Scheduler{pool: pool, q: q, rdb: rdb, band: bandSvc, slots: slots, staleAfter: staleAfter}
+	s := &Scheduler{pool: pool, q: q, rdb: rdb, band: bandSvc, slots: slots, staleAfter: staleAfter}
+	if len(policies) > 0 {
+		s.guestPolicy = policies[0]
+	}
+	return s
 }
 
 func slotKey(runID string) string        { return slotKeyPrefix + runID }
@@ -170,10 +176,11 @@ func (s *Scheduler) start(ctx context.Context, runID uuid.UUID, slot int) error 
 	var companyID, projectID, createdBy uuid.UUID
 	var branch *string
 	var dbEnabled bool
+	var isGuest bool
 	if err := s.pool.QueryRow(ctx,
-		`SELECT company_id, project_id, target_branch, created_by, db_migration_enabled
-		 FROM migration_runs WHERE id = $1`, runID,
-	).Scan(&companyID, &projectID, &branch, &createdBy, &dbEnabled); err != nil {
+		`SELECT mr.company_id, mr.project_id, mr.target_branch, mr.created_by, mr.db_migration_enabled, u.is_guest
+			 FROM migration_runs mr JOIN users u ON u.id = mr.created_by WHERE mr.id = $1`, runID,
+	).Scan(&companyID, &projectID, &branch, &createdBy, &dbEnabled, &isGuest); err != nil {
 		return fmt.Errorf("load run: %w", err)
 	}
 
@@ -183,6 +190,9 @@ func (s *Scheduler) start(ctx context.Context, runID uuid.UUID, slot int) error 
 		`SELECT github_repo_url, source_language, target_language FROM projects WHERE id = $1`, projectID,
 	).Scan(&repoURL, &srcLang, &tgtLang); err != nil {
 		return fmt.Errorf("load project: %w", err)
+	}
+	if isGuest && !s.guestPolicy.Allowed(deref(repoURL)) {
+		return fmt.Errorf("guest repository is not allowed")
 	}
 
 	rc := band.FerryRunContext{
@@ -196,6 +206,7 @@ func (s *Scheduler) start(ctx context.Context, runID uuid.UUID, slot int) error 
 		DBMigrationEnabled: dbEnabled,
 		User:               createdBy.String(),
 		Slot:               slot,
+		IsGuest:            isGuest,
 	}
 
 	s.rdb.Set(ctx, activeRunKey(runID.String()), "1", slotTTL)

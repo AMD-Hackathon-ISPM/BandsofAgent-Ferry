@@ -88,6 +88,10 @@ func (c *AgentClient) CreateChat(ctx context.Context, taskID string) (string, er
 	return resp.Data.ID, nil
 }
 
+func (c *AgentClient) DeleteChat(ctx context.Context, chatID string) error {
+	return c.doJSON(ctx, http.MethodDelete, fmt.Sprintf("/chats/%s", chatID), nil, nil)
+}
+
 func (c *AgentClient) AddParticipant(ctx context.Context, chatID, participantID string) error {
 	body := map[string]interface{}{
 		"participant": map[string]string{"participant_id": participantID},

@@ -22,6 +22,7 @@ type Claims struct {
 	CompanyID string `json:"companyId"`
 	Email     string `json:"email"`
 	Role      string `json:"role"`
+	IsGuest   bool   `json:"isGuest"`
 	jwt.RegisteredClaims
 }
 
@@ -50,7 +51,7 @@ func NewJWTManager(accessSecret, refreshSecret string, accessExp, refreshExp tim
 	}
 }
 
-func (m *JWTManager) GenerateTokenPair(userID, companyID, email, role string) (*TokenPair, error) {
+func (m *JWTManager) GenerateTokenPair(userID, companyID, email, role string, isGuest bool) (*TokenPair, error) {
 	now := time.Now()
 	accessExpiry := now.Add(m.accessExpiration)
 
@@ -59,6 +60,7 @@ func (m *JWTManager) GenerateTokenPair(userID, companyID, email, role string) (*
 		CompanyID: companyID,
 		Email:     email,
 		Role:      role,
+		IsGuest:   isGuest,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(accessExpiry),
 			IssuedAt:  jwt.NewNumericDate(now),

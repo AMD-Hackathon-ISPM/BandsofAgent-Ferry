@@ -61,6 +61,7 @@ type FerryRunContext struct {
 	DBFileID           string
 	User               string
 	Slot               int // concurrency slot assigned by the scheduler (selects the API key)
+	IsGuest            bool
 }
 
 func (rc FerryRunContext) RoomName() string {
@@ -102,6 +103,6 @@ You are the first stage. Analyze the repository, then hand off to the next agent
 		rc.DBMigrationEnabled,
 		dbFile,
 		sequence,
-		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User, Run: rc.MigrationRunID, DBEnabled: rc.DBMigrationEnabled, Slot: rc.Slot}),
+		MarshalCtx(RunCtx{Repo: rc.RepoFullName, Branch: rc.Branch, Src: rc.SourceLanguage, Tgt: rc.TargetLanguage, User: rc.User, Run: rc.MigrationRunID, DBEnabled: rc.DBMigrationEnabled, Slot: rc.Slot, IsGuest: rc.IsGuest}),
 	)
 }

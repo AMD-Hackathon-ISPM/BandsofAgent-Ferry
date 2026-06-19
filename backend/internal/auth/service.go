@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/ferry/backend/internal/db"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -25,14 +27,19 @@ type Service struct {
 	queries *db.Queries
 	jwt     *JWTManager
 	hasher  *PasswordHasher
+	pool    *pgxpool.Pool
 }
 
-func NewService(queries *db.Queries, jwt *JWTManager, hasher *PasswordHasher) *Service {
-	return &Service{
+func NewService(queries *db.Queries, jwt *JWTManager, hasher *PasswordHasher, pools ...*pgxpool.Pool) *Service {
+	service := &Service{
 		queries: queries,
 		jwt:     jwt,
 		hasher:  hasher,
 	}
+	if len(pools) > 0 {
+		service.pool = pools[0]
+	}
+	return service
 }
 
 type RegisterCompanyInput struct {
@@ -82,6 +89,7 @@ func (s *Service) RegisterCompany(ctx context.Context, input RegisterCompanyInpu
 		company.ID.String(),
 		user.Email,
 		string(db.MembershipRoleOwner),
+		user.IsGuest,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
@@ -110,6 +118,57 @@ type LoginOutput struct {
 	CompanyID string
 	Role      string
 	Tokens    *TokenPair
+	User      *LoginUser
+}
+
+type LoginUser struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Handle    string `json:"handle"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	AvatarURL string `json:"avatarUrl"`
+	IsGuest   bool   `json:"isGuest"`
+}
+
+func (s *Service) GuestLogin(ctx context.Context) (*LoginOutput, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("guest login is unavailable")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin guest login: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	q := s.queries.WithTx(tx)
+	id := uuid.New()
+	company, err := q.CreateCompany(ctx, "Guest Workspace", "guest-"+id.String(), nil, nil, nil, []byte(`{}`))
+	if err != nil {
+		return nil, fmt.Errorf("create guest company: %w", err)
+	}
+	user, err := q.CreateGuestUser(ctx, "guest+"+id.String()+"@ferry.local")
+	if err != nil {
+		return nil, fmt.Errorf("create guest user: %w", err)
+	}
+	role := db.MembershipRoleOwner
+	if _, err := q.CreateMembership(ctx, company.ID, user.ID, role, pgtype.UUID{}, pgtype.Timestamptz{Time: time.Now(), Valid: true}); err != nil {
+		return nil, fmt.Errorf("create guest membership: %w", err)
+	}
+	tokens, err := s.jwt.GenerateTokenPair(user.ID.String(), company.ID.String(), user.Email, string(role), true)
+	if err != nil {
+		return nil, fmt.Errorf("generate guest tokens: %w", err)
+	}
+	expiresAt := time.Now().Add(s.jwt.GetRefreshExpiration())
+	if _, err := q.CreateRefreshToken(ctx, user.ID, tokens.RefreshToken, pgtype.Timestamptz{Time: expiresAt, Valid: true}); err != nil {
+		return nil, fmt.Errorf("store guest refresh token: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit guest login: %w", err)
+	}
+	return &LoginOutput{
+		UserID: user.ID.String(), CompanyID: company.ID.String(), Role: string(role), Tokens: tokens,
+		User: &LoginUser{ID: user.ID.String(), Name: "Guest", Handle: "guest", Email: "guest@gmail.com", Role: string(role), IsGuest: true},
+	}, nil
 }
 
 func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginOutput, error) {
@@ -146,6 +205,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginOutput, er
 		membership.CompanyID.String(),
 		user.Email,
 		string(membership.Role),
+		user.IsGuest,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
@@ -201,6 +261,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*Token
 		membership.CompanyID.String(),
 		user.Email,
 		string(membership.Role),
+		user.IsGuest,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
@@ -307,7 +368,7 @@ func (s *Service) GitHubLogin(ctx context.Context, ghUser *GitHubUserInfo) (*Git
 		}
 	}
 
-	tokens, err := s.jwt.GenerateTokenPair(user.ID.String(), companyID, user.Email, string(role))
+	tokens, err := s.jwt.GenerateTokenPair(user.ID.String(), companyID, user.Email, string(role), user.IsGuest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}

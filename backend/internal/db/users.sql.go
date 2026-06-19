@@ -14,7 +14,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, full_name, avatar_url)
 VALUES ($1, $2, $3, $4)
-RETURNING id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at
+RETURNING id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at, is_guest
 `
 
 func (q *Queries) CreateUser(ctx context.Context, email string, passwordHash string, fullName string, avatarUrl *string) (User, error) {
@@ -36,6 +36,32 @@ func (q *Queries) CreateUser(ctx context.Context, email string, passwordHash str
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsGuest,
+	)
+	return i, err
+}
+
+const createGuestUser = `-- name: CreateGuestUser :one
+INSERT INTO users (email, password_hash, full_name, is_guest)
+VALUES ($1, '', 'Guest', true)
+RETURNING id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at, is_guest
+`
+
+func (q *Queries) CreateGuestUser(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, createGuestUser, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.FullName,
+		&i.AvatarUrl,
+		&i.EmailVerified,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.IsGuest,
 	)
 	return i, err
 }
@@ -51,8 +77,18 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const hardDeleteUser = `-- name: HardDeleteUser :exec
+DELETE FROM users
+WHERE id = $1 AND is_guest = true
+`
+
+func (q *Queries) HardDeleteUser(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, hardDeleteUser, id)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at, is_guest FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -70,12 +106,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsGuest,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at, is_guest FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -93,6 +130,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsGuest,
 	)
 	return i, err
 }
@@ -101,7 +139,7 @@ const updateUser = `-- name: UpdateUser :one
 UPDATE users
 SET full_name = $2, avatar_url = $3
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at
+RETURNING id, email, password_hash, full_name, avatar_url, email_verified, last_login_at, created_at, updated_at, deleted_at, is_guest
 `
 
 func (q *Queries) UpdateUser(ctx context.Context, iD uuid.UUID, fullName string, avatarUrl *string) (User, error) {
@@ -118,6 +156,7 @@ func (q *Queries) UpdateUser(ctx context.Context, iD uuid.UUID, fullName string,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.IsGuest,
 	)
 	return i, err
 }

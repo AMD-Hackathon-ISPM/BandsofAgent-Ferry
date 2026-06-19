@@ -3,6 +3,7 @@ package ferry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/config"
 	"github.com/ferry/backend/internal/db"
+	"github.com/ferry/backend/internal/guest"
 	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/ferry/backend/internal/scheduler"
 	"github.com/google/uuid"
@@ -23,10 +25,12 @@ type Handler struct {
 	band   *band.Service
 	agents config.AgentsConfig
 	sched  *scheduler.Scheduler
+	guestPolicy    *guest.RepoPolicy
+	guestAdmission *guest.Admission
 }
 
-func NewHandler(pool *pgxpool.Pool, q *db.Queries, bandSvc *band.Service, agents config.AgentsConfig, sched *scheduler.Scheduler) *Handler {
-	return &Handler{pool: pool, q: q, band: bandSvc, agents: agents, sched: sched}
+func NewHandler(pool *pgxpool.Pool, q *db.Queries, bandSvc *band.Service, agents config.AgentsConfig, sched *scheduler.Scheduler, guestPolicy *guest.RepoPolicy, guestAdmission *guest.Admission) *Handler {
+	return &Handler{pool: pool, q: q, band: bandSvc, agents: agents, sched: sched, guestPolicy: guestPolicy, guestAdmission: guestAdmission}
 }
 
 type createFerryRunRequest struct {
@@ -65,6 +69,20 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "repoFullName, sourceLanguage and targetLanguage are required")
 		return
 	}
+	isGuest := middleware.IsGuest(r.Context())
+	if isGuest && !h.guestPolicy.Allowed(req.RepoFullName) {
+		writeError(w, http.StatusForbidden, "repository is not available to guests")
+		return
+	}
+	var release func()
+	if isGuest {
+		release, err = h.guestAdmission.AdmitRun(r.Context(), companyID.String(), guest.ClientIP(r))
+		if err != nil {
+			writeGuestAdmissionError(w, err)
+			return
+		}
+		defer release()
+	}
 
 	ctx := r.Context()
 
@@ -74,7 +92,6 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to resolve project")
 		return
 	}
-
 	runNumber, err := h.q.GetNextRunNumber(ctx, companyID, projectID)
 	if err != nil {
 		log.Printf("ferry: next run number failed: %v", err)
@@ -147,4 +164,17 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func writeGuestAdmissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, guest.ErrRateLimited):
+		writeError(w, http.StatusTooManyRequests, "guest run creation rate limit exceeded")
+	case errors.Is(err, guest.ErrSessionCap):
+		writeError(w, http.StatusConflict, "guest session already has an active run")
+	case errors.Is(err, guest.ErrGlobalCap):
+		writeError(w, http.StatusServiceUnavailable, "guest run queue is full")
+	default:
+		writeError(w, http.StatusServiceUnavailable, "guest run admission is unavailable")
+	}
 }

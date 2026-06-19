@@ -9,6 +9,7 @@ import (
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/config"
 	"github.com/ferry/backend/internal/github"
+	"github.com/ferry/backend/internal/guest"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -52,7 +53,14 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		log.Printf("github app enabled (id %s) — PRs use per-repo installation tokens", cfg.GitHub.AppID)
 	}
 	ghTokens := github.NewUserTokens(rdb, cfg.GitHub.ClientID, cfg.GitHub.ClientSecret, cfg.GitHub.PAT)
-	source := NewSourceProvider(ghTokens, ghApp)
+	var guestPolicy *guest.RepoPolicy
+	if cfg.Features.EnableGuestMode {
+		guestPolicy, err = guest.NewRepoPolicy(cfg.GitHub.GuestRepos)
+		if err != nil {
+			return nil, fmt.Errorf("guest repository policy: %w", err)
+		}
+	}
+	source := NewSourceProvider(ghTokens, ghApp, cfg.GitHub.GuestPAT, guestPolicy)
 
 	keyByID := make(map[string]string)
 	for key, a := range cfg.Band.Agents {

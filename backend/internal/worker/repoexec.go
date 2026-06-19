@@ -272,6 +272,9 @@ func (w *Worker) runRepoExec(ctx context.Context, runCtx band.RunCtx, req repoEx
 	if !ok {
 		return "", fmt.Errorf("invalid repo %q", runCtx.Repo)
 	}
+	if runCtx.IsGuest && (w.source == nil || w.source.Token(ctx, runCtx.User, runCtx.Repo, true) == "") {
+		return "", fmt.Errorf("guest repository is not allowed")
+	}
 
 	spec := sandbox.Spec{
 		Image:   repoExecImage,
@@ -300,7 +303,7 @@ func (w *Worker) runRepoExec(ctx context.Context, runCtx band.RunCtx, req repoEx
 func (w *Worker) repoExecScript(ctx context.Context, runCtx band.RunCtx, owner, repo string, req repoExecRequest) string {
 	token := ""
 	if w.source != nil {
-		token = w.source.Token(ctx, runCtx.User)
+		token = w.source.Token(ctx, runCtx.User, runCtx.Repo, runCtx.IsGuest)
 	}
 
 	url := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)

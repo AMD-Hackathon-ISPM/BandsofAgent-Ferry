@@ -1,12 +1,16 @@
 import { IconBrandGithub, IconLock } from "@tabler/icons-react"
+import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/providers/auth-provider"
 import { Reveal } from "./use-reveal"
 import { StartMigrationButton } from "./cta"
 
 const GITHUB_REPO_URL = "https://github.com/AMD-Hackathon-ISPM/BandsofAgent-Ferry"
 
 export function FinalCta() {
+  const { beginGuest } = useAuth()
+  const navigate = useNavigate()
   return (
     <section className="border-t border-border bg-background">
       <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6">
@@ -36,7 +40,14 @@ export function FinalCta() {
                     View on GitHub
                   </a>
                 </Button>
-                <StartMigrationButton size="lg" className="px-4" />
+                <StartMigrationButton
+                  size="lg"
+                  className="px-4"
+                  onGuest={async () => {
+                    await beginGuest()
+                    navigate("/app")
+                  }}
+                />
               </div>
 
               <p className="mt-7 flex items-center gap-2 text-xs text-muted-foreground/80">

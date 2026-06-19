@@ -1,6 +1,6 @@
 import * as React from "react"
-import { Link, Navigate, Outlet, useLocation } from "react-router-dom"
-import { IconChevronDown, IconLogout } from "@tabler/icons-react"
+import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { IconChevronDown, IconLogin, IconLogout } from "@tabler/icons-react"
 
 import { useDocumentTitle } from "@/lib/hooks"
 import { cn } from "@/lib/utils"
@@ -57,6 +57,7 @@ export function useAppChrome() {
 function AccountMenu() {
   const { user, signOut } = useAuth()
   const { theme, setTheme } = useTheme()
+  const navigate = useNavigate()
   if (!user) return null
   return (
     <DropdownMenu>
@@ -92,10 +93,22 @@ function AccountMenu() {
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
+          {user.isGuest ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                signOut()
+                navigate("/login")
+              }}
+            >
+              <IconLogin data-icon="inline-start" />
+              Sign in
+            </DropdownMenuItem>
+          ) : (
           <DropdownMenuItem onSelect={() => signOut()} variant="destructive">
             <IconLogout data-icon="inline-start" />
             Sign out
           </DropdownMenuItem>
+          )}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
