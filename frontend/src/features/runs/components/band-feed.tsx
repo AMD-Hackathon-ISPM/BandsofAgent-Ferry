@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { AgentGlyph } from "@/features/migrations/components/agent"
 import { BandChatter } from "@/features/runs/components/band-chatter"
 import { Markdown } from "@/components/markdown"
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Button } from "@/components/ui/button"
 import {
   Collapsible,
@@ -35,6 +36,18 @@ const TYPE_TONE: Record<string, string> = {
   signal: "text-signal",
   success: "text-success",
   warning: "text-warning",
+}
+
+// What the active agent is doing right now, per phase. Two words, Title Case,
+// so the processing line reads like a live status, not a spinner.
+const PHASE_ACTIVITY: Record<PhaseKey, string> = {
+  planning: "Mapping Plan",
+  analysis: "Reading Source",
+  translation: "Writing Code",
+  db_migration: "Migrating Schema",
+  testing: "Checking Behavior",
+  review: "Reviewing Artifacts",
+  pr_generation: "Opening PR",
 }
 
 function PrimitiveValue({ value }: { value: unknown }) {
@@ -218,6 +231,37 @@ function MessageRow({
   )
 }
 
+function ProcessingRow({ agent, label }: { agent: AgentKey; label: string }) {
+  const meta = AGENTS[agent]
+  return (
+    <li className="stream-in flex items-stretch gap-3">
+      <div className="flex flex-col items-center pt-0.5">
+        <AgentGlyph agent={agent} size="md" active />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1 pb-4">
+        <span className="text-xs font-medium" style={{ color: meta.color }}>
+          {meta.name}
+        </span>
+        <Shimmer
+          as="span"
+          className="font-mono text-[12.5px] leading-snug"
+          duration={3}
+          spread={2}
+          style={
+            {
+              // Grey base text, glint sweeps in the agent's own hue.
+              "--shimmer-color": "var(--color-muted-foreground)",
+              "--shimmer-highlight": meta.color,
+            } as React.CSSProperties
+          }
+        >
+          {label}
+        </Shimmer>
+      </div>
+    </li>
+  )
+}
+
 export function BandFeed({
   run,
   messages,
@@ -256,6 +300,22 @@ export function BandFeed({
     [messages, selectedAgent, selectedPhase]
   )
   const hasFilter = Boolean(selectedAgent || selectedPhase)
+
+  const processing = React.useMemo(() => {
+    if (!isLive(run.status) || messages.length === 0) return null
+    const last = messages[messages.length - 1]
+    // Waiting on the user, not processing → no indicator.
+    if (last.requiresAction || last.type === "blocker") return null
+    // Handoff → the receiving agent is now picking up.
+    if (last.type === "handoff" && last.targetAgent) {
+      return { agent: last.targetAgent, label: "Taking Over" }
+    }
+    // Otherwise the last agent is still at work on the current phase.
+    return {
+      agent: last.agent,
+      label: PHASE_ACTIVITY[last.phase] ?? "Working",
+    }
+  }, [messages, run.status])
 
   const checkBottom = React.useCallback(() => {
     const el = scrollRef.current
@@ -358,6 +418,12 @@ export function BandFeed({
                 now={now}
               />
             ))}
+            {processing && !hasFilter && (
+              <ProcessingRow
+                agent={processing.agent}
+                label={processing.label}
+              />
+            )}
           </ol>
         )}
       </div>
