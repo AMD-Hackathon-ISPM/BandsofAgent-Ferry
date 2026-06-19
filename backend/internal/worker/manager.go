@@ -83,8 +83,11 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		resolveLLM := func(target string, slot int) (string, string, string) {
 			return cfg.Agents.ForAgentTargetSlot(agentKey, target, slot)
 		}
+		resolveAnyLLM := func(agentKey, target string, slot int) (string, string, string) {
+			return cfg.Agents.ForAgentTargetSlot(agentKey, target, slot)
+		}
 
-		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, resolveLLM, limiters, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
+		workers = append(workers, NewWorker(roster[a.Key], role, client, llm, resolveLLM, resolveAnyLLM, limiters, source, execEnabled, cfg.Sandbox.RunnerURL, cfg.Band.BaseURL, roster, rdb, keyByID))
 	}
 
 	if len(workers) == 0 {

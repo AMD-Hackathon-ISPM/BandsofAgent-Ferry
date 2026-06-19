@@ -29,15 +29,16 @@ type Worker struct {
 	llm    *LLM
 	// resolveLLM returns (baseURL, apiKey, model) for a given target language
 	// and run slot — the slot selects which provider key the run uses.
-	resolveLLM  func(target string, slot int) (string, string, string)
-	limiters    []*Limiter // one concurrency limiter per slot/key
-	source      *SourceProvider
-	execEnabled bool
-	runnerURL   string
-	bandBaseURL string
-	roster      map[string]AgentInfo
-	rdb         *redis.Client
-	keyByID     map[string]string
+	resolveLLM    func(target string, slot int) (string, string, string)
+	resolveAnyLLM func(agentKey, target string, slot int) (string, string, string)
+	limiters      []*Limiter // one concurrency limiter per slot/key
+	source        *SourceProvider
+	execEnabled   bool
+	runnerURL     string
+	bandBaseURL   string
+	roster        map[string]AgentInfo
+	rdb           *redis.Client
+	keyByID       map[string]string
 
 	mu      sync.Mutex
 	joined  map[string]bool
@@ -45,24 +46,25 @@ type Worker struct {
 	steps   map[string]bool // in-memory fallback for per-step idempotency when rdb is nil
 }
 
-func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, resolveLLM func(string, int) (string, string, string), limiters []*Limiter, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
+func NewWorker(info AgentInfo, role agentRole, client *band.AgentClient, llm *LLM, resolveLLM func(string, int) (string, string, string), resolveAnyLLM func(string, string, int) (string, string, string), limiters []*Limiter, source *SourceProvider, execEnabled bool, runnerURL, bandBaseURL string, roster map[string]AgentInfo, rdb *redis.Client, keyByID map[string]string) *Worker {
 	return &Worker{
-		info:        info,
-		role:        role,
-		client:      client,
-		llm:         llm,
-		resolveLLM:  resolveLLM,
-		limiters:    limiters,
-		source:      source,
-		execEnabled: execEnabled,
-		runnerURL:   runnerURL,
-		bandBaseURL: bandBaseURL,
-		roster:      roster,
-		rdb:         rdb,
-		keyByID:     keyByID,
-		joined:      make(map[string]bool),
-		handled:     make(map[string]bool),
-		steps:       make(map[string]bool),
+		info:          info,
+		role:          role,
+		client:        client,
+		llm:           llm,
+		resolveLLM:    resolveLLM,
+		resolveAnyLLM: resolveAnyLLM,
+		limiters:      limiters,
+		source:        source,
+		execEnabled:   execEnabled,
+		runnerURL:     runnerURL,
+		bandBaseURL:   bandBaseURL,
+		roster:        roster,
+		rdb:           rdb,
+		keyByID:       keyByID,
+		joined:        make(map[string]bool),
+		handled:       make(map[string]bool),
+		steps:         make(map[string]bool),
 	}
 }
 
@@ -368,8 +370,7 @@ func (w *Worker) handle(ctx context.Context, chatID string, msg *band.IncomingMe
 
 	prompt := w.buildPrompt(ctx, msg, runCtx, execReport)
 
-	base, key, model := w.resolveLLM(runCtx.Tgt, runCtx.Slot)
-	output, err := w.llm.Complete(ctx, base, key, model, w.limiterForSlot(runCtx.Slot), w.role.system, prompt)
+	output, err := w.completeStage(ctx, runCtx, prompt)
 	if err != nil {
 		log.Printf("[%s] llm failed: %v", w.info.Key, err)
 		w.releaseStep(ctx, runCtx.Run, w.info.Key, runCtx.Rework) // allow a retry on redelivery

@@ -17,8 +17,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ferry ./cmd/api &
 FROM alpine:latest
 
 # docker-cli lets the agents launch ephemeral sandbox containers via the host
-# Docker socket (mounted in docker-compose) for code execution.
-RUN apk --no-cache add ca-certificates docker-cli
+# Docker socket (mounted in docker-compose) for code execution. git is used by
+# the workers to shallow-clone source repos before building the prompt digest.
+RUN apk --no-cache add ca-certificates docker-cli git
 
 WORKDIR /root/
 
