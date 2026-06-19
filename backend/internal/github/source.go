@@ -166,11 +166,14 @@ func buildDigestFromDir(root, owner, repo, branch, sourceLang string) (string, e
 			}
 			return nil
 		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 
 		allPaths = append(allPaths, rel)
 
 		info, err := d.Info()
-		if err != nil || info.Size() <= 0 || info.Size() > maxFileBytes {
+		if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxFileBytes {
 			return nil
 		}
 

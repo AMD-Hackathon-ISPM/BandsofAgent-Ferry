@@ -101,7 +101,7 @@ func main() {
 		artifactStore = store
 	}
 
-	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService, sched, artifactStore)
+	runsHandler := runspkg.NewHandler(pool, queries, rdb, authService, bandService, sched, artifactStore, ghTokens)
 	ferryHandler := ferrypkg.NewHandler(pool, queries, bandService, cfg.Agents, sched)
 
 	// Mirror Band chat transcripts into agent_messages + Redis so the run

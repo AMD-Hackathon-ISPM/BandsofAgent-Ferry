@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"github.com/ferry/backend/internal/auth"
 	"github.com/ferry/backend/internal/band"
 	"github.com/ferry/backend/internal/db"
+	ghpkg "github.com/ferry/backend/internal/github"
 	"github.com/ferry/backend/internal/http/middleware"
 	"github.com/ferry/backend/internal/scheduler"
 	"github.com/ferry/backend/internal/storage"
@@ -24,17 +26,24 @@ import (
 )
 
 type Handler struct {
-	pool        *pgxpool.Pool
-	q           *db.Queries
-	rdb         *redis.Client
-	authService *auth.Service
-	band        *band.Service
-	sched       *scheduler.Scheduler
-	blobs       *storage.MinIOClient
+	pool               *pgxpool.Pool
+	q                  *db.Queries
+	rdb                *redis.Client
+	authService        *auth.Service
+	band               *band.Service
+	sched              *scheduler.Scheduler
+	blobs              *storage.MinIOClient
+	validateRepoAccess repoAccessValidator
 }
 
-func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service, sched *scheduler.Scheduler, blobs *storage.MinIOClient) *Handler {
-	return &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc, sched: sched, blobs: blobs}
+type repoAccessValidator func(context.Context, string, string) error
+
+func NewHandler(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, authService *auth.Service, bandSvc *band.Service, sched *scheduler.Scheduler, blobs *storage.MinIOClient, ghTokens ...*ghpkg.UserTokens) *Handler {
+	h := &Handler{pool: pool, q: q, rdb: rdb, authService: authService, band: bandSvc, sched: sched, blobs: blobs}
+	if len(ghTokens) > 0 && ghTokens[0] != nil {
+		h.validateRepoAccess = gitHubRepoAccessValidator(ghTokens[0])
+	}
+	return h
 }
 
 type projectVM struct {
@@ -175,6 +184,17 @@ func repoOwnerName(repoURL string) (owner, name string) {
 		return parts[0], parts[1]
 	}
 	return "", clean
+}
+
+func gitHubRepoAccessValidator(tokens *ghpkg.UserTokens) repoAccessValidator {
+	return func(ctx context.Context, userID, repo string) error {
+		owner, name := repoOwnerName(repo)
+		if owner == "" || name == "" {
+			return ghpkg.ErrNotFound
+		}
+		_, err := ghpkg.NewClient(tokens.Token(ctx, userID)).ResolveRepo(ctx, owner, name)
+		return err
+	}
 }
 
 func strPtr(s *string) string {
@@ -495,6 +515,16 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Repo == "" {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	if h.validateRepoAccess != nil {
+		if err := h.validateRepoAccess(r.Context(), userID.String(), req.Repo); err != nil {
+			if errors.Is(err, ghpkg.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "repository not found")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "failed to reach GitHub")
+			return
+		}
 	}
 
 	projectID, err := h.findOrCreateProject(r.Context(), companyID, userID, req)

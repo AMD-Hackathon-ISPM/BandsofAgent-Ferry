@@ -29,7 +29,7 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 	if !ok {
 		return ""
 	}
-	key := rc.Repo + "@" + rc.Branch + "@" + rc.Src
+	key := digestCacheKey(rc)
 
 	s.mu.Lock()
 	if v, hit := s.cache[key]; hit {
@@ -49,6 +49,10 @@ func (s *SourceProvider) Digest(ctx context.Context, rc band.RunCtx) string {
 	s.cache[key] = digest
 	s.mu.Unlock()
 	return digest
+}
+
+func digestCacheKey(rc band.RunCtx) string {
+	return rc.User + "@" + rc.Run + "@" + rc.Repo + "@" + rc.Branch + "@" + rc.Src
 }
 
 // Token resolves the GitHub token for read operations. The user's OAuth token
