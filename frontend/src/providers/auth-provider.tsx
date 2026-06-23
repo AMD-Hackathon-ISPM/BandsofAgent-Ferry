@@ -9,7 +9,9 @@ import type { Role } from "@/lib/domain"
 import { CURRENT_USER } from "@/lib/mock/data"
 import type { User } from "@/lib/types"
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
+const API_URL =
+  import.meta.env.VITE_API_URL?.trim() ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080")
 const STORAGE_KEY = "ferry.session"
 
 interface StoredSession {

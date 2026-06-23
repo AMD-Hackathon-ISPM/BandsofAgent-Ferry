@@ -3,7 +3,9 @@ import { USE_DUMMY_DATA } from "@/lib/dev-mode"
 import { isLive } from "@/lib/domain"
 import { RECENT_RUNS, getRun } from "@/lib/mock/data"
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080"
+const API_URL =
+  import.meta.env.VITE_API_URL?.trim() ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080")
 const SESSION_KEY = "ferry.session"
 const dummyArtifactPreviewed = new Set<string>()
 const dummyStartedRuns = new Set<string>()

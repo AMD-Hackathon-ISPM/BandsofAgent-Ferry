@@ -67,8 +67,9 @@ services:
       DB_HOST: postgres
       REDIS_HOST: redis
       MINIO_ENDPOINT: minio:9000
-      FRONTEND_URL: http://localhost
-      GITHUB_REDIRECT_URI: http://localhost/auth/github/callback
+      FRONTEND_URL: ${PUBLIC_ORIGIN:-http://daffatrg.me}
+      GITHUB_REDIRECT_URI: ${PUBLIC_ORIGIN:-http://daffatrg.me}/auth/github/callback
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://daffatrg.me,http://www.daffatrg.me}
     volumes:
       # GitHub App private key (read-only) → path referenced by GITHUB_APP_PRIVATE_KEY_PATH
       - ./backend/ferrylocal.2026-06-16.private-key.pem:/etc/ferry/github-app.pem:ro
@@ -130,7 +131,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: http://localhost
+        VITE_API_URL: ${VITE_API_URL:-}
     container_name: ferry-frontend
     networks:
       - ferry-network
